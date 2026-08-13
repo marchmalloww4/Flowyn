@@ -9,3 +9,5 @@ coverage/
 *.log
 .DS_Store
 drizzle.config.local.ts
+
+*.tsbuildinfo
