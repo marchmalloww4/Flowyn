@@ -1,0 +1,76 @@
+name: flowyn
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-flowyn-local-development-secret-change-me}
+      DATABASE_URL: postgres://flowyn:flowyn@postgres:5432/flowyn
+      REDIS_URL: redis://redis:6379
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      AI_REQUEST_TIMEOUT_MS: ${AI_REQUEST_TIMEOUT_MS:-60000}
+      MAX_GENERATION_PROMPT_CHARS: ${MAX_GENERATION_PROMPT_CHARS:-12000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: flowyn
+      POSTGRES_PASSWORD: flowyn
+      POSTGRES_DB: flowyn
+    ports:
+      - "5432:5432"
+    volumes:
+      - flowyn-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowyn -d flowyn"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - flowyn-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    command: ["/bin/sh", "/opt/flowyn/entrypoint.sh"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - flowyn-ollama-data:/root/.ollama
+      - ./docker/ollama/entrypoint.sh:/opt/flowyn/entrypoint.sh:ro
+
+volumes:
+  flowyn-postgres-data:
+  flowyn-redis-data:
+  flowyn-ollama-data:
