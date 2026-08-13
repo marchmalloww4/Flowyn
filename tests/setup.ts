@@ -1,0 +1,1 @@
+// Vitest setup is intentionally empty for the foundation.
