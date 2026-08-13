@@ -12,6 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type { WorkspaceRole } from "@/lib/workspaces/roles";
+import { embeddingVector } from "@/lib/database/vector";
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -171,6 +172,45 @@ export const generationLogs = pgTable("generation_logs", {
   workspaceCreatedIdx: index("generation_logs_workspace_created_idx").on(table.workspaceId, table.createdAt),
 }));
 
+export type KnowledgeIndexStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
+
+export const knowledgeDocuments = pgTable("knowledge_documents", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  sourceType: text("source_type").notNull().default("manual"),
+  sourceName: text("source_name"),
+  content: text("content").notNull(),
+  metadata: jsonb("metadata").$type<Record<string, string | number | boolean | null>>().default({}).notNull(),
+  contentHash: text("content_hash"),
+  status: text("status").$type<KnowledgeIndexStatus>().notNull().default("PENDING"),
+  errorCode: text("error_code"),
+  ...timestamps,
+}, (table) => ({
+  workspaceBrandCreatedIdx: index("knowledge_documents_workspace_brand_created_idx").on(table.workspaceId, table.brandId, table.createdAt),
+  brandIdx: index("knowledge_documents_brand_idx").on(table.brandId),
+  statusCheck: check("knowledge_documents_status_check", sql`${table.status} in ('PENDING', 'PROCESSING', 'READY', 'FAILED')`),
+}));
+
+export const knowledgeChunks = pgTable("knowledge_chunks", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "cascade" }),
+  documentId: uuid("document_id").notNull().references(() => knowledgeDocuments.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  stableKey: text("stable_key").notNull(),
+  content: text("content").notNull(),
+  metadata: jsonb("metadata").$type<Record<string, string | number | boolean | null>>().default({}).notNull(),
+  embedding: embeddingVector("embedding").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  documentChunkUnique: uniqueIndex("knowledge_chunks_document_stable_key_idx").on(table.documentId, table.stableKey),
+  workspaceBrandIdx: index("knowledge_chunks_workspace_brand_idx").on(table.workspaceId, table.brandId),
+  documentIdx: index("knowledge_chunks_document_idx").on(table.documentId),
+  embeddingHnswIdx: index("knowledge_chunks_embedding_hnsw_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
+}));
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
@@ -180,6 +220,8 @@ export const userRelations = relations(user, ({ many }) => ({
 export const workspaceRelations = relations(workspaces, ({ many }) => ({
   members: many(workspaceMembers),
   brands: many(brands),
+  knowledgeDocuments: many(knowledgeDocuments),
+  knowledgeChunks: many(knowledgeChunks),
 }));
 
 export const brandRelations = relations(brands, ({ one, many }) => ({
@@ -187,6 +229,20 @@ export const brandRelations = relations(brands, ({ one, many }) => ({
   voiceProfile: one(brandVoiceProfiles),
   rules: many(brandRules),
   examples: many(brandExamples),
+  knowledgeDocuments: many(knowledgeDocuments),
+  knowledgeChunks: many(knowledgeChunks),
+}));
+
+export const knowledgeDocumentRelations = relations(knowledgeDocuments, ({ one, many }) => ({
+  workspace: one(workspaces, { fields: [knowledgeDocuments.workspaceId], references: [workspaces.id] }),
+  brand: one(brands, { fields: [knowledgeDocuments.brandId], references: [brands.id] }),
+  chunks: many(knowledgeChunks),
+}));
+
+export const knowledgeChunkRelations = relations(knowledgeChunks, ({ one }) => ({
+  workspace: one(workspaces, { fields: [knowledgeChunks.workspaceId], references: [workspaces.id] }),
+  brand: one(brands, { fields: [knowledgeChunks.brandId], references: [brands.id] }),
+  document: one(knowledgeDocuments, { fields: [knowledgeChunks.documentId], references: [knowledgeDocuments.id] }),
 }));
 
 export const schema = {
@@ -202,4 +258,6 @@ export const schema = {
   brandExamples,
   auditLogs,
   generationLogs,
+  knowledgeDocuments,
+  knowledgeChunks,
 };

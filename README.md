@@ -2,7 +2,7 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1, 2, and 3**:
+This repository currently contains **Milestones 1, 2, 3, and 4**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -11,11 +11,12 @@ This repository currently contains **Milestones 1, 2, and 3**:
 - Server-side workspace authorization, role-aware membership management, workspace CRUD, and brand CRUD APIs.
 - Uppercase `OWNER`, `ADMIN`, and `MEMBER` roles with tenant-scoped authorization and mutation audit events.
 - Provider-agnostic AI generation with trusted configuration, native Ollama streaming, structured output validation, and workspace-scoped generation logs.
+- Verified local `nomic-embed-text` embeddings, PostgreSQL pgvector knowledge chunks, deterministic indexing, semantic retrieval, bounded BrandContext, and optional RAG generation.
 - Redis and Ollama provisioned through Docker Compose.
 - A provider-abstracted Ollama health and generation API.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, and Ollama behavior.
 
-Workflow execution, agents, RAG, queues, scheduling, webhooks, approvals, integrations, billing, and the content editor are intentionally not implemented yet. Milestone 4 is the next planned boundary.
+Workflow execution, agents, queues, scheduling, webhooks, approvals, integrations, billing, and the content editor are intentionally not implemented yet. Milestone 5 is the next planned boundary.
 
 ## Quick start
 
@@ -67,6 +68,8 @@ The health endpoints are:
 - `/api/health/redis`
 - `/api/health/ollama`
 - `/api/ai/health`
+- `/api/knowledge`
+- `/api/knowledge/retrieve`
 
 ## Project structure
 
@@ -78,6 +81,8 @@ lib/brands/          Brand validation and service layer
 lib/database/        Drizzle client, schema, migration, and seed
 lib/health/          PostgreSQL, Redis, and Ollama probes
 lib/ai/              LLM provider contract and Ollama implementation
+lib/embeddings/      Verified-dimension embedding provider and errors
+lib/knowledge/       Chunking, indexing, retrieval, and BrandContext services
 db/migrations/       Generated PostgreSQL migrations
 tests/               Vitest tests
 scripts/             Local verification helpers

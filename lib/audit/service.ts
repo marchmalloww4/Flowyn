@@ -10,9 +10,13 @@ export type AuditAction =
   | "membership.left"
   | "brand.created"
   | "brand.updated"
-  | "brand.deleted";
+  | "brand.deleted"
+  | "knowledge.created"
+  | "knowledge.updated"
+  | "knowledge.deleted"
+  | "knowledge.reindexed";
 
-export type AuditResourceType = "workspace" | "membership" | "brand";
+export type AuditResourceType = "workspace" | "membership" | "brand" | "knowledge";
 
 const sensitiveKey = /(password|token|secret|credential|api[-_]?key|access[-_]?token|refresh[-_]?token)/i;
 

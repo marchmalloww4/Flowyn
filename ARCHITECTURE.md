@@ -1,8 +1,8 @@
 # Architecture
 
-## Milestone 3 boundary
+## Milestone 4 boundary
 
-Flowyn is intentionally a modular monolith. Milestones 1 through 3 establish the runtime, authentication, tenant boundary, role-aware membership management, brand foundation, audit trail, and provider-agnostic local AI engine—not the eventual automation engine.
+Flowyn is intentionally a modular monolith. Milestones 1 through 4 establish the runtime, authentication, tenant boundary, role-aware membership management, brand foundation, audit trail, provider-agnostic local AI, verified local embeddings, pgvector knowledge, and bounded RAG—not the eventual automation engine.
 
 ```mermaid
 graph TD
@@ -10,7 +10,9 @@ graph TD
   Next --> Auth[Better Auth]
   Next --> Services[Domain services]
   Services --> DB[Drizzle ORM]
-  DB --> Postgres[(PostgreSQL)]
+  DB --> Postgres[(PostgreSQL + pgvector)]
+  Services --> Embed[EmbeddingProvider]
+  Embed --> Ollama
   Next --> Provider[LLMProvider]
   Provider --> Ollama[Ollama HTTP API]
   Next --> Redis[(Redis provisioned for later queues)]
@@ -23,8 +25,10 @@ graph TD
 3. Protected routes derive the user from the server session.
 4. Workspace, membership, and brand services verify the authenticated user's membership and required role before accessing workspace-owned records.
 5. Drizzle executes typed PostgreSQL queries.
-6. AI generation verifies workspace access, builds an optional brand-aware prompt, and calls the `LLMProvider` interface through the configured Ollama implementation.
-7. Errors are converted into safe structured responses; connection strings and credentials are never returned.
+6. Knowledge operations resolve an authorized brand, chunk manual content, call the configured embedding provider, and store verified vectors with workspace and brand foreign keys.
+7. Retrieval embeds the query and applies workspace, brand, and READY filters inside the SQL query before ordering by cosine distance and limiting results.
+8. Optional RAG generation combines structured brand data with bounded, explicitly untrusted retrieved knowledge before calling `LLMProvider`.
+9. Errors are converted into safe structured responses; connection strings and credentials are never returned.
 
 ## Modules
 
@@ -40,6 +44,8 @@ graph TD
 - `lib/ai/config.ts`: trusted provider/model/timeout/generation configuration.
 - `lib/ai/prompt.ts`: reusable system, user, context, brand, and output prompt composition.
 - `lib/ai/generation-log.ts`: safe generation metadata persistence without prompt/response storage.
+- `lib/embeddings`: verified-dimension embedding contract, typed errors, configuration, and Ollama implementation.
+- `lib/knowledge`: sanitized document storage, deterministic chunking, indexing, SQL retrieval, and hybrid BrandContext.
 - `lib/security`: application error envelope and validation-safe responses.
 
 Business logic belongs in these modules, not in React components.
@@ -50,13 +56,15 @@ A workspace is the authorization boundary. Every brand query first resolves the 
 
 ## Data model
 
-Milestone 3 includes Better Auth tables plus:
+Milestone 4 includes Better Auth tables plus:
 
 - `workspaces` and `workspace_members`.
 - `brands`, `brand_voice_profiles`, `brand_rules`, and `brand_examples`.
 - `audit_logs` for important workspace mutations.
 - lookup indexes for workspace, member, brand, and audit-log access paths.
 - `generation_logs` for provider, model, status, duration, character counts, and safe error codes.
+- `knowledge_documents` for workspace/brand-scoped manual knowledge, content hashes, indexing state, and safe metadata.
+- `knowledge_chunks` for deterministic chunks and validated `vector(768)` embeddings from the live `nomic-embed-text` model.
 
 Structured future Brand DNA fields are stored in JSONB where the shape is expected to evolve. Normalized rules and examples remain separate so later ingestion and analysis can attach provenance.
 
@@ -65,7 +73,7 @@ Structured future Brand DNA fields are stored in JSONB where the shape is expect
 Compose starts:
 
 - `app`: Next.js development container.
-- `postgres`: PostgreSQL 16 with a named data volume.
+  - `postgres`: pgvector-capable PostgreSQL 16 with a named data volume.
 - `redis`: Redis 7 with append-only persistence; no BullMQ worker exists in Milestone 3.
 - `ollama`: local inference server with a named model volume.
 
@@ -92,9 +100,12 @@ Mutation routes record sanitized audit events for workspace, membership, and bra
 
 `POST /api/ai/generate` requires the authenticated user to provide a workspace ID. Optional brand context is resolved through the authorized brand service and must belong to that workspace. Complete responses use JSON; `stream: true` returns native provider chunks as Server-Sent Events. Generation logs retain only safe operational metadata.
 
+Knowledge routes are protected by the same session and workspace boundary: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/:id`, `POST /api/knowledge/:id/reindex`, and `POST /api/knowledge/retrieve`. Client workspace and brand IDs are validated but never trusted without server-side brand ownership and membership checks. Embeddings are never returned to clients.
+
 ## Extension points
 
 - Add a new AI provider by implementing `LLMProvider` in `lib/ai` and selecting it through trusted server configuration in `getAIProvider`.
 - Add a new health probe by implementing a safe probe in `lib/health` and a route under `app/api/health`.
 - Add a new workspace-owned module by requiring membership before the first read/write and adding its workspace foreign key to the schema.
+- Add a new embedding provider by implementing `EmbeddingProvider` and preserving explicit dimension validation.
 - Later milestones can add queue and workflow services without moving domain logic into the UI.

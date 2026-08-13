@@ -7,6 +7,7 @@ import type { LLMGenerateInput, LLMProvider, LLMResult, LLMStreamChunk } from "@
 import { getBrand } from "@/lib/brands/service";
 import { getDatabase, type Database } from "@/lib/database";
 import { requireWorkspaceMember } from "@/lib/authz/authorization";
+import { getBrandContext } from "@/lib/knowledge/brand-context";
 import { AppError } from "@/lib/security/errors";
 
 export interface GenerationRequest {
@@ -17,6 +18,7 @@ export interface GenerationRequest {
   system?: string;
   temperature?: number;
   maxTokens?: number;
+  useBrandContext?: boolean;
 }
 
 export interface PreparedGeneration {
@@ -40,15 +42,21 @@ export async function prepareGeneration(input: GenerationRequest, provider: LLMP
   await requireWorkspaceMember(input.userId, input.workspaceId, db);
   const config = getAIConfig();
   let brandContext;
+  if (input.useBrandContext && !input.brandId) throw new InvalidRequestError("A brand is required when brand context is enabled.");
   if (input.brandId) {
     const brand = await getBrand(input.userId, input.brandId, db);
     if (brand.workspaceId !== input.workspaceId) throw new AppError("RESOURCE_NOT_FOUND", 404, "Resource not found.");
     brandContext = brand;
   }
+  if (input.useBrandContext && input.brandId) {
+    const hybridContext = await getBrandContext({ userId: input.userId, brandId: input.brandId, query: input.prompt, includeKnowledge: true }, db);
+    brandContext = { ...hybridContext.brand, retrievedKnowledge: hybridContext.knowledge };
+  }
   const built = buildPrompt({
     systemInstructions: input.system,
     userInstructions: input.prompt,
     brandContext,
+    ragEnabled: input.useBrandContext === true,
   });
   if (built.totalChars > config.maxPromptChars) throw new InvalidRequestError("The prompt exceeds the configured local limit.");
   return {

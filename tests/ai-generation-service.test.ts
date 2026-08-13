@@ -43,6 +43,13 @@ describe("workspace-scoped generation service", () => {
     await expect(prepareGeneration({ userId: "user-1", workspaceId: "11111111-1111-4111-8111-111111111111", brandId: "22222222-2222-4222-8222-222222222222", prompt: "Hello" }, provider)).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND", status: 404 });
   });
 
+  it("preserves the Milestone 3 provider input when RAG is disabled", async () => {
+    const prepared = await prepareGeneration({ userId: "user-1", workspaceId: "11111111-1111-4111-8111-111111111111", brandId: "22222222-2222-4222-8222-222222222222", prompt: "Hello" }, provider);
+
+    expect(prepared.providerInput.system).toBeUndefined();
+    expect(prepared.providerInput.prompt).toBe("User instructions:\nHello\n\nBrand context:\nName: Acme\nTone: clear");
+  });
+
   it("logs successful generation metadata without prompt or response content", async () => {
     const prepared = await prepareGeneration({ userId: "user-1", workspaceId: "11111111-1111-4111-8111-111111111111", prompt: "Hello" }, provider);
     await expect(generateText(prepared, {} as never)).resolves.toMatchObject({ text: "Generated output" });

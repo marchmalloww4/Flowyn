@@ -13,6 +13,9 @@
 - AI generation requires authenticated workspace membership; optional brand context is checked against the same workspace.
 - AI provider configuration is server-side only; clients cannot select arbitrary endpoints or models.
 - Generation logs store operational metadata only and exclude prompts, responses, credentials, URLs, and stack traces.
+- Knowledge documents and chunks are workspace- and brand-scoped with server-side authorization and cascading ownership foreign keys.
+- Semantic retrieval applies workspace and brand filters inside SQL before limiting results and never returns embeddings.
+- Retrieved knowledge is delimited as untrusted prompt data and is never placed in the system instruction.
 - Structured AI output is parsed and validated with Zod before application use.
 - No shell execution, arbitrary code execution, or generic database tool is exposed to AI.
 - Docker services use named volumes and explicit healthchecks.
@@ -36,7 +39,7 @@ SSRF protection, encrypted integration credentials, rate limiting, CSRF policy r
 
 ## Local AI boundary
 
-Ollama is reachable on the local network by design. The current generation route accepts prompts only from authenticated users with workspace access and sends them to the configured local provider. It does not allow the model to execute commands, choose arbitrary URLs, or select arbitrary provider configuration. Native streaming forwards text only; it does not expose raw provider errors.
+Ollama is reachable on the local network by design. Generation and embedding routes use only trusted server configuration; users cannot select arbitrary model or endpoint URLs. The generation and knowledge routes require authenticated workspace access, do not allow model command execution, and do not expose raw provider errors or embeddings. Native streaming forwards text only.
 
 ## Reporting issues
 

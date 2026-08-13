@@ -21,6 +21,8 @@ interface LLMProvider {
 AI_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.2:3b
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+OLLAMA_EMBEDDING_DIMENSION=768
 AI_TEMPERATURE=0.4
 AI_MAX_OUTPUT_TOKENS=800
 AI_REQUEST_TIMEOUT_MS=60000
@@ -36,6 +38,7 @@ Authenticated request
   -> workspace membership check
   -> Zod request validation and prompt builder
   -> optional authorized brand context
+  -> optional bounded semantic retrieval through EmbeddingProvider
   -> configured LLMProvider
   -> Ollama /api/generate (stream=true or false)
   -> typed result or native SSE chunks
@@ -67,6 +70,18 @@ Structured calls request Ollama JSON, parse the returned text with `JSON.parse`,
 
 The agent and workflow milestones will consume this interface, not Ollama directly.
 
-## Milestone 3 limitations
+## Local embeddings and RAG
 
-There is no RAG, embedding, document ingestion, agent loop, tool selection/execution, memory, critic, workflow node execution, scheduling, webhook, approval, integration, or editor surface in this milestone. The generation panel exercises the provider boundary before those systems are introduced.
+The live `nomic-embed-text` model was queried through Ollama `/api/embed` and returned exactly 768 values. `OLLAMA_EMBEDDING_DIMENSION=768` is explicit configuration, `vector(768)` is the database type, and `OllamaEmbeddingProvider` rejects any response with another dimension. It does not infer, truncate, or pad vectors.
+
+Knowledge documents are manual text owned by one workspace and brand. Indexing hashes content, chunks it deterministically, embeds all chunks, replaces old chunks transactionally, and marks the document `READY` or `FAILED`. Unchanged READY documents are not re-embedded.
+
+Retrieval performs vector cosine similarity in PostgreSQL with workspace, brand, and READY filters in the SQL `WHERE` clause. Results contain source metadata and similarity only; embeddings never leave the server.
+
+RAG is opt-in through `useBrandContext: true`. The prompt separates trusted structured brand data from `<untrusted_knowledge>` retrieved text and places the user request in a separate section. Retrieved documents are data, not system instructions.
+
+The local verification flow makes a real embedding request, asserts the verified 768-dimensional finite vector, then runs guarded pgvector retrieval and RAG generation checks against the existing services.
+
+## Milestone 4 limitations
+
+There is no external file import, autonomous agent loop, tool execution, memory, critic, workflow node execution, queue, scheduling, webhook, approval, integration, billing, or editor surface in this milestone. Knowledge input is manual text and indexing is synchronous.

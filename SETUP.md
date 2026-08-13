@@ -27,12 +27,16 @@ Important variables:
 | `REDIS_URL` | Redis connection for host commands | `redis://localhost:6379` |
 | `OLLAMA_BASE_URL` | Ollama HTTP API | `http://localhost:11434` |
 | `OLLAMA_MODEL` | Default local instruct model | `llama3.2:3b` |
-| `OLLAMA_EMBEDDING_MODEL` | Future embedding model | `nomic-embed-text` |
+| `OLLAMA_EMBEDDING_MODEL` | Local embedding model | `nomic-embed-text` |
+| `OLLAMA_EMBEDDING_DIMENSION` | Verified vector dimension returned by the running model | `768` |
 | `AI_PROVIDER` | Trusted provider selection | `ollama` |
 | `AI_TEMPERATURE` | Default generation temperature | `0.4` |
 | `AI_MAX_OUTPUT_TOKENS` | Default output token limit | `800` |
 | `AI_REQUEST_TIMEOUT_MS` | Provider request timeout | `60000` |
 | `MAX_GENERATION_PROMPT_CHARS` | Combined prompt character limit | `12000` |
+| `KNOWLEDGE_CHUNK_SIZE` | Deterministic chunk size in characters | `1200` |
+| `KNOWLEDGE_CHUNK_OVERLAP` | Deterministic chunk overlap in characters | `150` |
+| `RAG_MAX_CONTEXT_CHARS` | Maximum retrieved context passed to the model | `8000` |
 
 ## Start the local services
 
@@ -42,7 +46,7 @@ docker compose up -d
 docker compose ps
 ```
 
-PostgreSQL, Redis, and Ollama use named volumes so restarts do not remove data or downloaded models.
+PostgreSQL uses the pgvector-capable `pgvector/pgvector:pg16` image. PostgreSQL, Redis, and Ollama use named volumes so restarts do not remove data or downloaded models.
 
 Pull the recommended local models once:
 
@@ -77,6 +81,10 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000). Create an account at `/sign-up`, create a workspace and brand in `/dashboard`, then try the local AI panel.
 
 Workspace membership, brand mutations, and AI generation are authorized server-side using the authenticated session and the member's workspace role. AI generation requires a workspace ID and can optionally include a brand ID from that same workspace.
+
+Brand knowledge is manual text scoped to a brand. Creating or re-indexing a document validates and chunks its content, calls `nomic-embed-text`, validates the live configured dimension, and replaces its chunks transactionally. RAG is opt-in through `useBrandContext: true` and retrieved text is delimited as untrusted data.
+
+`scripts/verify-local.ps1` also performs a live 768-dimensional finite-vector probe and runs the guarded Ollama/pgvector/RAG integration tests with `RUN_OLLAMA_INTEGRATION=1`. These checks require the existing Docker services and database migration to be available; they do not reset volumes.
 
 ## Health checks
 

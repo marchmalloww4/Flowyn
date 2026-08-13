@@ -18,4 +18,14 @@ describe("AI prompt builder", () => {
     expect(result.prompt).toContain("Return one paragraph.");
     expect(result.totalChars).toBe(result.system.length + result.prompt.length);
   });
+
+  it("preserves the Milestone 3 prompt contract when RAG is disabled", () => {
+    const result = buildPrompt({
+      userInstructions: "Write a welcome message.",
+      brandContext: { name: "Acme", tone: "clear" },
+    });
+
+    expect(result.system).toBe("");
+    expect(result.prompt).toBe("User instructions:\nWrite a welcome message.\n\nBrand context:\nName: Acme\nTone: clear");
+  });
 });

@@ -9,6 +9,7 @@ export const aiGenerationRequestSchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().positive().max(getAIConfig().maxOutputTokens).optional(),
   stream: z.boolean().default(false),
+  useBrandContext: z.boolean().default(false),
 }).strict();
 
 export type AIGenerationRequestInput = z.infer<typeof aiGenerationRequestSchema>;

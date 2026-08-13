@@ -9,11 +9,17 @@ const envSchema = z.object({
   OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434"),
   OLLAMA_MODEL: z.string().min(1).default("llama3.2:3b"),
   OLLAMA_EMBEDDING_MODEL: z.string().min(1).default("nomic-embed-text"),
+  OLLAMA_EMBEDDING_DIMENSION: z.coerce.number().int().positive().max(4096).default(768),
   AI_PROVIDER: z.enum(["ollama"]).default("ollama"),
   AI_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.4),
   AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().max(4000).default(800),
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().max(300000).default(60000),
   MAX_GENERATION_PROMPT_CHARS: z.coerce.number().int().positive().max(100000).default(12000),
+  KNOWLEDGE_CHUNK_SIZE: z.coerce.number().int().positive().max(10000).default(1200),
+  KNOWLEDGE_CHUNK_OVERLAP: z.coerce.number().int().nonnegative().max(5000).default(150),
+  MAX_KNOWLEDGE_DOCUMENT_CHARS: z.coerce.number().int().positive().max(1000000).default(200000),
+  RAG_MAX_CONTEXT_CHARS: z.coerce.number().int().positive().max(50000).default(8000),
+  RAG_TOP_K: z.coerce.number().int().positive().max(20).default(5),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
