@@ -11,3 +11,5 @@ export async function requireUser(headers: Headers) {
   if (!user) throw new AppError("UNAUTHENTICATED", 401, "Sign in is required.");
   return user;
 }
+
+export const requireAuthenticatedUser = requireUser;

@@ -2,18 +2,19 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestone 1 only**:
+This repository currently contains **Milestones 1 and 2**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
 - PostgreSQL schema and Drizzle migrations for users, workspaces, memberships, brands, brand voice data, and audit logs.
 - Better Auth email/password authentication.
-- Server-side workspace authorization and brand CRUD APIs.
+- Server-side workspace authorization, role-aware membership management, workspace CRUD, and brand CRUD APIs.
+- Uppercase `OWNER`, `ADMIN`, and `MEMBER` roles with tenant-scoped authorization and mutation audit events.
 - Redis and Ollama provisioned through Docker Compose.
 - A provider-abstracted Ollama health and generation API.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, and Ollama behavior.
 
-Workflow execution, agents, RAG, queues, scheduling, webhooks, approvals, integrations, and the content editor are intentionally not implemented yet.
+Workflow execution, agents, RAG, queues, scheduling, webhooks, approvals, integrations, billing, and the content editor are intentionally not implemented yet. Milestone 3 is the next planned boundary.
 
 ## Quick start
 
@@ -36,6 +37,8 @@ Workflow execution, agents, RAG, queues, scheduling, webhooks, approvals, integr
 
 7. Start the host app with `npm run dev`.
 8. Open [http://localhost:3000](http://localhost:3000).
+
+Workspace and membership APIs are protected by the authenticated session. All workspace-owned reads and writes verify server-side membership and role.
 
 For full setup and troubleshooting, see [SETUP.md](SETUP.md). For architecture decisions, see [ARCHITECTURE.md](ARCHITECTURE.md).
 

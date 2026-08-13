@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { brandInputSchema } from "@/lib/brands/validation";
+import { canPerformWorkspaceAction } from "@/lib/authz/authorization";
 
 describe("brand input", () => {
   it("applies safe defaults to optional brand DNA fields", () => {
@@ -11,5 +12,10 @@ describe("brand input", () => {
 
   it("rejects a brand without a valid workspace id", () => {
     expect(() => brandInputSchema.parse({ workspaceId: "other", name: "Acme AI" })).toThrow();
+  });
+
+  it("allows admins to write brands but keeps members read-only", () => {
+    expect(canPerformWorkspaceAction("ADMIN", "brand.write")).toBe(true);
+    expect(canPerformWorkspaceAction("MEMBER", "brand.write")).toBe(false);
   });
 });

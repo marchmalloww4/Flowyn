@@ -72,6 +72,8 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). Create an account at `/sign-up`, create a workspace and brand in `/dashboard`, then try the local AI panel.
 
+Workspace membership and brand mutations are authorized server-side using the authenticated session and the member's workspace role.
+
 ## Health checks
 
 ```powershell

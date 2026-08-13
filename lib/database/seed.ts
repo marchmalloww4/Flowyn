@@ -11,7 +11,7 @@ async function seedDatabase(): Promise<void> {
     console.log("Demo workspace already exists; seed is idempotent.");
     return;
   }
-  await db.insert(workspaceMembers).values({ workspaceId, userId: createdBy, role: "owner" });
+  await db.insert(workspaceMembers).values({ workspaceId, userId: createdBy, role: "OWNER" });
   await db.insert(brands).values({ workspaceId, createdBy, name: "Acme AI", description: "A practical AI partner for growing teams.", tone: "clear, confident, and helpful", targetAudience: "Operations and marketing teams" });
   console.log("Seeded Demo Workspace and Acme AI.");
 }

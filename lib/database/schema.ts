@@ -1,13 +1,16 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   jsonb,
+  index,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { WorkspaceRole } from "@/lib/workspaces/roles";
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -72,11 +75,13 @@ export const workspaceMembers = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
-    role: text("role").notNull().default("member"),
+    role: text("role").$type<WorkspaceRole>().notNull().default("MEMBER"),
     ...timestamps,
   },
   (table) => ({
     userWorkspaceUnique: uniqueIndex("workspace_members_user_workspace_idx").on(table.workspaceId, table.userId),
+    userIdx: index("workspace_members_user_idx").on(table.userId),
+    roleCheck: check("workspace_members_role_check", sql`${table.role} in ('OWNER', 'ADMIN', 'MEMBER')`),
   }),
 );
 
@@ -100,7 +105,9 @@ export const brands = pgTable("brands", {
   formattingPreferences: text("formatting_preferences"),
   productInformation: text("product_information"),
   ...timestamps,
-});
+}, (table) => ({
+  workspaceIdx: index("brands_workspace_idx").on(table.workspaceId),
+}));
 
 export const brandVoiceProfiles = pgTable("brand_voice_profiles", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -118,7 +125,9 @@ export const brandRules = pgTable("brand_rules", {
   value: text("value").notNull(),
   explanation: text("explanation"),
   ...timestamps,
-});
+}, (table) => ({
+  brandIdx: index("brand_rules_brand_idx").on(table.brandId),
+}));
 
 export const brandExamples = pgTable("brand_examples", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -127,7 +136,9 @@ export const brandExamples = pgTable("brand_examples", {
   source: text("source"),
   explanation: text("explanation"),
   ...timestamps,
-});
+}, (table) => ({
+  brandIdx: index("brand_examples_brand_idx").on(table.brandId),
+}));
 
 export const auditLogs = pgTable("audit_logs", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -138,7 +149,9 @@ export const auditLogs = pgTable("audit_logs", {
   resourceId: text("resource_id"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => ({
+  workspaceCreatedIdx: index("audit_logs_workspace_created_idx").on(table.workspaceId, table.createdAt),
+}));
 
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
