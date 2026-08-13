@@ -28,7 +28,11 @@ Important variables:
 | `OLLAMA_BASE_URL` | Ollama HTTP API | `http://localhost:11434` |
 | `OLLAMA_MODEL` | Default local instruct model | `llama3.2:3b` |
 | `OLLAMA_EMBEDDING_MODEL` | Future embedding model | `nomic-embed-text` |
+| `AI_PROVIDER` | Trusted provider selection | `ollama` |
+| `AI_TEMPERATURE` | Default generation temperature | `0.4` |
+| `AI_MAX_OUTPUT_TOKENS` | Default output token limit | `800` |
 | `AI_REQUEST_TIMEOUT_MS` | Provider request timeout | `60000` |
+| `MAX_GENERATION_PROMPT_CHARS` | Combined prompt character limit | `12000` |
 
 ## Start the local services
 
@@ -72,7 +76,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). Create an account at `/sign-up`, create a workspace and brand in `/dashboard`, then try the local AI panel.
 
-Workspace membership and brand mutations are authorized server-side using the authenticated session and the member's workspace role.
+Workspace membership, brand mutations, and AI generation are authorized server-side using the authenticated session and the member's workspace role. AI generation requires a workspace ID and can optionally include a brand ID from that same workspace.
 
 ## Health checks
 

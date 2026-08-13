@@ -10,6 +10,10 @@
 - Secrets kept in server environment variables and excluded from Git.
 - Provider errors sanitized so connection URLs and credentials are not returned.
 - Prompt length and generation token bounds.
+- AI generation requires authenticated workspace membership; optional brand context is checked against the same workspace.
+- AI provider configuration is server-side only; clients cannot select arbitrary endpoints or models.
+- Generation logs store operational metadata only and exclude prompts, responses, credentials, URLs, and stack traces.
+- Structured AI output is parsed and validated with Zod before application use.
 - No shell execution, arbitrary code execution, or generic database tool is exposed to AI.
 - Docker services use named volumes and explicit healthchecks.
 
@@ -32,7 +36,7 @@ SSRF protection, encrypted integration credentials, rate limiting, CSRF policy r
 
 ## Local AI boundary
 
-Ollama is reachable on the local network by design. The current generation route accepts prompts only from authenticated users and sends them to the configured local provider. It does not allow the model to execute commands or choose arbitrary URLs.
+Ollama is reachable on the local network by design. The current generation route accepts prompts only from authenticated users with workspace access and sends them to the configured local provider. It does not allow the model to execute commands, choose arbitrary URLs, or select arbitrary provider configuration. Native streaming forwards text only; it does not expose raw provider errors.
 
 ## Reporting issues
 

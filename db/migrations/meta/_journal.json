@@ -15,6 +15,13 @@
       "when": 1786644117878,
       "tag": "0001_tiresome_jack_murdock",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786647583277,
+      "tag": "0002_green_ink",
+      "breakpoints": true
     }
   ]
 }

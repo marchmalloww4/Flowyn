@@ -2,6 +2,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  integer,
   jsonb,
   index,
   pgTable,
@@ -153,6 +154,23 @@ export const auditLogs = pgTable("audit_logs", {
   workspaceCreatedIdx: index("audit_logs_workspace_created_idx").on(table.workspaceId, table.createdAt),
 }));
 
+export const generationLogs = pgTable("generation_logs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  status: text("status").$type<"SUCCEEDED" | "FAILED">().notNull(),
+  durationMs: integer("duration_ms").notNull(),
+  inputChars: integer("input_chars").notNull(),
+  outputChars: integer("output_chars"),
+  errorCode: text("error_code"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  statusCheck: check("generation_logs_status_check", sql`${table.status} in ('SUCCEEDED', 'FAILED')`),
+  workspaceCreatedIdx: index("generation_logs_workspace_created_idx").on(table.workspaceId, table.createdAt),
+}));
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
@@ -183,4 +201,5 @@ export const schema = {
   brandRules,
   brandExamples,
   auditLogs,
+  generationLogs,
 };

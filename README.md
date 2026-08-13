@@ -2,7 +2,7 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1 and 2**:
+This repository currently contains **Milestones 1, 2, and 3**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -10,11 +10,12 @@ This repository currently contains **Milestones 1 and 2**:
 - Better Auth email/password authentication.
 - Server-side workspace authorization, role-aware membership management, workspace CRUD, and brand CRUD APIs.
 - Uppercase `OWNER`, `ADMIN`, and `MEMBER` roles with tenant-scoped authorization and mutation audit events.
+- Provider-agnostic AI generation with trusted configuration, native Ollama streaming, structured output validation, and workspace-scoped generation logs.
 - Redis and Ollama provisioned through Docker Compose.
 - A provider-abstracted Ollama health and generation API.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, and Ollama behavior.
 
-Workflow execution, agents, RAG, queues, scheduling, webhooks, approvals, integrations, billing, and the content editor are intentionally not implemented yet. Milestone 3 is the next planned boundary.
+Workflow execution, agents, RAG, queues, scheduling, webhooks, approvals, integrations, billing, and the content editor are intentionally not implemented yet. Milestone 4 is the next planned boundary.
 
 ## Quick start
 

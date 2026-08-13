@@ -7,6 +7,7 @@ describe("Milestone 1 database schema", () => {
     expect(Object.keys(schema.schema)).toEqual(expect.arrayContaining([
       "user", "session", "account", "verification", "workspaces", "workspaceMembers",
       "brands", "brandVoiceProfiles", "brandRules", "brandExamples", "auditLogs",
+      "generationLogs",
     ]));
   });
 
@@ -19,5 +20,13 @@ describe("Milestone 1 database schema", () => {
   it("defines the role values used by the database constraint", () => {
     expect(WORKSPACE_ROLES).toEqual(["OWNER", "ADMIN", "MEMBER"]);
     expect(schema.workspaceMembers.role).toBeDefined();
+  });
+
+  it("exports safe generation log fields", () => {
+    expect(schema.generationLogs.workspaceId).toBeDefined();
+    expect(schema.generationLogs.provider).toBeDefined();
+    expect(schema.generationLogs.model).toBeDefined();
+    expect(schema.generationLogs.status).toBeDefined();
+    expect("metadata" in schema.generationLogs).toBe(false);
   });
 });

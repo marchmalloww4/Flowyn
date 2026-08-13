@@ -64,7 +64,7 @@ try {
   Invoke-RequiredCommand "npm" @("test", "--", "--run")
   Invoke-RequiredCommand "npm" @("run", "build")
 
-  Write-Host "Milestone 2 local verification passed."
+  Write-Host "Milestone 3 local verification passed."
 } finally {
   Pop-Location
 }
