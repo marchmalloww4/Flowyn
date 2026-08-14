@@ -47,6 +47,17 @@ Important variables:
 
 Milestone 6 workflow limits are WORKFLOW_MAX_STEPS 20, WORKFLOW_TOTAL_TIMEOUT_MS 300000, WORKFLOW_STEP_TIMEOUT_MS 60000, WORKFLOW_MAX_RETRIES 2, WORKFLOW_MAX_INPUT_CHARS 12000, WORKFLOW_MAX_OUTPUT_CHARS 16000, WORKFLOW_MAX_CONTEXT_CHARS 24000, WORKFLOW_DISPATCH_LEASE_MS 30000, WORKFLOW_EXECUTION_LEASE_MS 90000, and WORKFLOW_WORKER_CONCURRENCY 1. These values bound inputs, context, attempts, execution time, leases, and worker concurrency.
 
+Milestone 7 scheduling variables:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| SCHEDULER_POLL_INTERVAL_MS | Scheduler polling interval | 5000 |
+| SCHEDULER_BATCH_SIZE | Maximum due schedules considered per poll | 25 |
+| SCHEDULER_HEARTBEAT_TTL_SECONDS | Redis scheduler liveness TTL | 30 |
+| SCHEDULE_MISFIRE_GRACE_SECONDS | Maximum bounded misfire age | 60 |
+| SCHEDULE_MIN_INTERVAL_SECONDS | Minimum interval schedule period | 60 |
+| SCHEDULE_MAX_INTERVAL_SECONDS | Maximum interval schedule period | 31536000 |
+
 ## Start the local services
 
 ```powershell
@@ -95,9 +106,11 @@ Brand knowledge is manual text scoped to a brand. Creating or re-indexing a docu
 
 The dashboard Agents panel manages workspace-owned definitions and lets members run enabled agents synchronously. Definitions may be optionally bound to a brand; the server validates that relationship and removes brand-dependent tools when no trusted brand is available. DELETE is a soft delete so run history remains readable. The run body accepts only `goal`; the server supplies workspace, user, agent, brand, tool, policy, and cancellation context. GET `/api/agent-runs/:id` returns only bounded run fields and safe step summaries.
 
-`scripts/verify-local.ps1` also performs a live 768-dimensional finite-vector probe and runs the guarded Ollama/pgvector/RAG/agent integration tests with `RUN_OLLAMA_INTEGRATION=1`. These checks require the existing Docker services and database migration to be available; they do not reset volumes.
+scripts/verify-local.ps1 performs a live finite-vector probe, uses that verified dimension when checking PostgreSQL, and runs the guarded Ollama/pgvector/RAG/agent/workflow/scheduling integration tests. These checks require the existing Docker services and database migration to be available; they do not reset volumes.
 
 The dashboard Workflows panel accepts a strict JSON definition and creates immutable versions. Runs are queued through a PostgreSQL outbox and BullMQ, then executed by the worker. Supported steps are SET_VALUE, TRANSFORM, CONDITION, AI_GENERATE, and AGENT. Definitions have one reachable entry graph with no cycles. Run history contains durable bounded output and safe metadata, not hidden reasoning or raw model/tool observations. Workflow execution is at-least-once: leases recover stale workers, and deterministic job identity prevents duplicate logical runs.
+
+The dashboard Workflow schedules panel creates CRON, INTERVAL, and ONE_TIME schedules for existing workflows. Schedule state and occurrence history are stored in PostgreSQL; the scheduler service polls due rows, creates the existing durable workflow run/outbox records, and the worker executes them. Check the scheduler with docker compose exec scheduler npm run scheduler:health. Members can view schedules and history; admins and owners can mutate them.
 
 ## Health checks
 
@@ -117,6 +130,11 @@ The worker is independently startable and health is based on a Redis heartbeat r
 docker compose ps worker
 docker compose exec worker npm run worker:health
 
+The scheduler is independently startable and has the same heartbeat model:
+
+docker compose ps scheduler
+docker compose exec scheduler npm run scheduler:health
+
 ## Automated verification
 
 ```powershell
@@ -126,6 +144,7 @@ docker compose exec worker npm run worker:health
 The script validates Compose, starts services, waits for app and dependency health, runs migrations, and executes TypeScript, lint, tests, and build checks. It never installs software automatically. If Docker is not installed, it exits with a clear prerequisite error.
 
 The full local verification script also checks workflow tables, constraints, leases, outbox fields, worker heartbeat, clean migrations, BullMQ execution, immutable snapshots, and workflow/Ollama integration. It never resets databases or deletes Docker volumes.
+It additionally checks schedule tables, occurrence uniqueness, scheduler heartbeat, bounded one-time execution, and schedule-to-worker delivery.
 
 ## Troubleshooting
 

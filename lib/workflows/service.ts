@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gt, isNull, inArray, lt, or } from "drizzle-orm";
-import { getAgent } from "@/lib/agents/service";
-import { getBrand } from "@/lib/brands/service";
+import { getAgent, getAgentForWorkspace } from "@/lib/agents/service";
+import { getBrand, getBrandForWorkspace } from "@/lib/brands/service";
 import { requireWorkspaceAction, requireWorkspaceMember } from "@/lib/authz/authorization";
 import { recordAuditEvent } from "@/lib/audit/service";
-import { getDatabase, type Database, workflowRunDispatches, workflowRuns, workflowStepRuns, workflowVersions, workflows } from "@/lib/database";
+import { getDatabase, type Database, workflowRunDispatches, workflowRuns, workflowScheduleOccurrences, workflowStepRuns, workflowVersions, workflows } from "@/lib/database";
 import { AppError } from "@/lib/security/errors";
+import { userExecutionPrincipal, workspaceAutomationPrincipal, type ExecutionPrincipal, type WorkspaceAutomationPrincipal } from "@/lib/security/principal";
 import { validateWorkflowDefinition } from "@/lib/workflows/validation";
 import { getWorkflowExecutionPolicy } from "@/lib/workflows/policy";
 import type { JsonValue, WorkflowDefinition } from "@/lib/workflows/types";
@@ -51,18 +52,26 @@ function resourceNotFound(): AppError {
   return new AppError("WORKFLOW_NOT_FOUND", 404, "Workflow not found.");
 }
 
-async function validateReferencedResources(userId: string, workspaceId: string, definition: WorkflowDefinition, db: Database, requireUsable: boolean): Promise<void> {
+async function validateReferencedResourcesForPrincipal(principal: ExecutionPrincipal, workspaceId: string, definition: WorkflowDefinition, db: Database, requireUsable: boolean): Promise<void> {
   for (const step of definition.steps) {
     if (step.type === "AGENT") {
-      const agent = await getAgent(userId, step.config.agentId, db);
+      const agent = principal.kind === "workspace_automation"
+        ? await getAgentForWorkspace(workspaceId, step.config.agentId, db)
+        : await getAgent(principal.userId, step.config.agentId, db);
       if (agent.workspaceId !== workspaceId) throw resourceNotFound();
       if (requireUsable && !agent.enabled) throw new AppError("WORKFLOW_AGENT_NOT_ALLOWED", 409, "The referenced agent is disabled.");
     }
     if ((step.type === "AI_GENERATE" || step.type === "AGENT") && "brandId" in step.config && step.config.brandId) {
-      const brand = await getBrand(userId, step.config.brandId, db);
+      const brand = principal.kind === "workspace_automation"
+        ? await getBrandForWorkspace(workspaceId, step.config.brandId, db)
+        : await getBrand(principal.userId, step.config.brandId, db);
       if (brand.workspaceId !== workspaceId) throw resourceNotFound();
     }
   }
+}
+
+async function validateReferencedResources(userId: string, workspaceId: string, definition: WorkflowDefinition, db: Database, requireUsable: boolean): Promise<void> {
+  await validateReferencedResourcesForPrincipal(userExecutionPrincipal(userId), workspaceId, definition, db, requireUsable);
 }
 
 async function loadWorkflow(userId: string, workflowId: string, db: Database, includeDeleted = false): Promise<WorkflowDefinitionRecord> {
@@ -71,6 +80,14 @@ async function loadWorkflow(userId: string, workflowId: string, db: Database, in
   const [workflow] = await db.select().from(workflows).where(and(...conditions)).limit(1);
   if (!workflow) throw resourceNotFound();
   await requireWorkspaceMember(userId, workflow.workspaceId, db);
+  return workflow;
+}
+
+async function loadWorkflowForWorkspace(workspaceId: string, workflowId: string, db: Database, includeDeleted = false): Promise<WorkflowDefinitionRecord> {
+  const conditions = [eq(workflows.id, workflowId), eq(workflows.workspaceId, workspaceId)];
+  if (!includeDeleted) conditions.push(isNull(workflows.deletedAt));
+  const [workflow] = await db.select().from(workflows).where(and(...conditions)).limit(1);
+  if (!workflow) throw resourceNotFound();
   return workflow;
 }
 
@@ -185,6 +202,60 @@ export async function createWorkflowRun(userId: string, workflowId: string, inpu
   });
 }
 
+export interface ScheduledWorkflowRunInput {
+  principal: WorkspaceAutomationPrincipal;
+  scheduleId: string;
+  occurrenceId: string;
+  workspaceId: string;
+  workflowId: string;
+  input: JsonValue;
+  idempotencyKey: string;
+}
+
+export async function createScheduledWorkflowRun(input: ScheduledWorkflowRunInput, db: Database = getDatabase()): Promise<WorkflowRun> {
+  if (input.principal.workspaceId !== input.workspaceId || input.principal.scheduleId !== input.scheduleId) {
+    throw new AppError("WORKFLOW_PRINCIPAL_INVALID", 500, "The scheduled workflow principal is out of scope.");
+  }
+  if (!input.idempotencyKey || input.idempotencyKey.length > 120) {
+    throw new AppError("WORKFLOW_IDEMPOTENCY_CONFLICT", 400, "The workflow idempotency key is invalid.");
+  }
+  const workflow = await loadWorkflowForWorkspace(input.workspaceId, input.workflowId, db);
+  if (!workflow.enabled) throw new AppError("WORKFLOW_DISABLED", 409, "The workflow is disabled.");
+  const parsedInput = workflowRunSchema.parse({ input: input.input }).input as JsonValue;
+  const version = await loadVersion(workflow, db);
+  const definition = validateWorkflowDefinition(version.definition);
+  await validateReferencedResourcesForPrincipal(input.principal, input.workspaceId, definition, db, true);
+  if (JSON.stringify(parsedInput).length > getWorkflowExecutionPolicy().maxInputChars) {
+    throw new AppError("WORKFLOW_CONTEXT_LIMIT", 400, "Workflow input exceeds the configured limit.");
+  }
+  const [existing] = await db.select().from(workflowRuns).where(and(eq(workflowRuns.workspaceId, input.workspaceId), eq(workflowRuns.idempotencyKey, input.idempotencyKey))).limit(1);
+  if (existing) {
+    if (existing.workflowId !== input.workflowId) throw new AppError("WORKFLOW_IDEMPOTENCY_CONFLICT", 409, "The idempotency key is already used for another workflow.");
+    return existing;
+  }
+  const insert = db.insert(workflowRuns).values({
+    workspaceId: input.workspaceId,
+    workflowId: workflow.id,
+    workflowVersion: version.version,
+    workflowVersionId: version.id,
+    definitionSnapshot: definition,
+    status: "QUEUED",
+    startedBy: null,
+    input: parsedInput,
+    currentStepId: definition.entryStepId,
+    idempotencyKey: input.idempotencyKey,
+  });
+  const [run] = await insert.onConflictDoNothing({ target: [workflowRuns.workspaceId, workflowRuns.idempotencyKey] }).returning();
+  if (!run) {
+    const [duplicate] = await db.select().from(workflowRuns).where(and(eq(workflowRuns.workspaceId, input.workspaceId), eq(workflowRuns.idempotencyKey, input.idempotencyKey))).limit(1);
+    if (duplicate) return duplicate;
+    throw new AppError("WORKFLOW_RUN_CREATE_FAILED", 500, "Workflow run could not be created.");
+  }
+  await db.insert(workflowRunDispatches).values({ runId: run.id, status: "PENDING", attempts: 0 }).returning();
+  await recordAuditEvent({ workspaceId: run.workspaceId, actorUserId: null, action: "workflow.run_queued", resourceType: "workflow_run", resourceId: run.id, metadata: { workflowId: workflow.id, version: version.version, scheduleId: input.scheduleId, occurrenceId: input.occurrenceId, principalKind: input.principal.kind } }, db);
+  return run;
+}
+
 export async function getWorkflowRun(userId: string, runId: string, db: Database = getDatabase()): Promise<WorkflowRunHistory> {
   const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
   if (!run) throw new AppError("WORKFLOW_NOT_FOUND", 404, "Workflow run not found.");
@@ -196,6 +267,16 @@ export async function getWorkflowRun(userId: string, runId: string, db: Database
 export async function getWorkflowRunRecord(runId: string, db: Database = getDatabase()): Promise<WorkflowRun | null> {
   const [run] = await db.select().from(workflowRuns).where(eq(workflowRuns.id, runId)).limit(1);
   return run ?? null;
+}
+
+export async function resolveWorkflowRunPrincipal(run: WorkflowRun, db: Database = getDatabase()): Promise<ExecutionPrincipal> {
+  if (run.startedBy) return userExecutionPrincipal(run.startedBy);
+  const [occurrence] = await db.select({ scheduleId: workflowScheduleOccurrences.scheduleId, workspaceId: workflowScheduleOccurrences.workspaceId })
+    .from(workflowScheduleOccurrences)
+    .where(and(eq(workflowScheduleOccurrences.workflowRunId, run.id), eq(workflowScheduleOccurrences.workspaceId, run.workspaceId)))
+    .limit(1);
+  if (!occurrence) throw new AppError("WORKFLOW_PRINCIPAL_MISSING", 500, "The scheduled workflow run has no execution principal.");
+  return workspaceAutomationPrincipal(occurrence.workspaceId, occurrence.scheduleId);
 }
 
 export async function cancelWorkflowRun(userId: string, runId: string, db: Database = getDatabase()): Promise<WorkflowRun> {

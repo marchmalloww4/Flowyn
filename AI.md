@@ -88,7 +88,7 @@ Retrieval performs vector cosine similarity in PostgreSQL with workspace, brand,
 
 RAG is opt-in through `useBrandContext: true`. The prompt separates trusted structured brand data from `<untrusted_knowledge>` retrieved text and places the user request in a separate section. Retrieved documents are data, not system instructions.
 
-The local verification flow makes a real embedding request, asserts the verified 768-dimensional finite vector, then runs guarded pgvector retrieval and RAG generation checks against the existing services.
+The local verification flow makes a real embedding request, derives the live finite-vector dimension, compares it to PostgreSQL, then runs guarded pgvector retrieval and RAG generation checks against the existing services.
 
 ## Milestone 6 workflow execution
 
@@ -96,6 +96,12 @@ AI_GENERATE resolves a bounded workflow expression into a prompt, calls prepareG
 
 Workflow AI outputs are durable values, not merely audit metadata. Model name, duration, output length, and safe error codes are stored separately. Prompts, raw responses beyond the bounded output, hidden reasoning, tool observations, and credentials are not persisted in workflow history. Provider and Agent failures default to non-retryable; timeouts are not automatically retried.
 
-## Milestone 6 limitations
+## Milestone 7 scheduled workflow execution
 
-There is no external file import, agent memory, critic, multi-agent orchestration, visual workflow canvas, scheduling, webhook, approval, integration, or billing in this milestone. Knowledge input is manual text, workflow graphs are bounded and cycle-free, and external triggers are deferred.
+Scheduled workflows reuse the existing workflow snapshot, outbox, BullMQ, worker, LLMProvider, BrandContext/RAG, and controlled AgentRunner paths. The scheduler only performs short PostgreSQL transactions and never calls a model. A workspace automation principal supplies verified workspace/schedule scope; it does not create a user, and generation/agent audit identity fields remain nullable.
+
+The scheduler supports five-field CRON, bounded INTERVAL, and terminal ONE_TIME schedules. PostgreSQL occurrence uniqueness and deterministic workflow idempotency prevent duplicate logical runs when schedulers overlap or restart. SKIP and FIRE_ONCE misfires are bounded by the configured grace window.
+
+## Milestone 7 limitations
+
+There is no external file import, agent memory, critic, multi-agent orchestration, visual workflow canvas, webhook, approval, integration, or billing in this milestone. Scheduling is limited to local PostgreSQL-backed CRON, INTERVAL, and ONE_TIME triggers; external triggers remain deferred.

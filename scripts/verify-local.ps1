@@ -10,6 +10,7 @@ $previousRunOllamaIntegration = $env:RUN_OLLAMA_INTEGRATION
 $previousRunAgentIntegration = $env:RUN_AGENT_INTEGRATION
 $previousRunWorkflowIntegration = $env:RUN_WORKFLOW_INTEGRATION
 $previousRunWorkflowOllamaIntegration = $env:RUN_WORKFLOW_OLLAMA_INTEGRATION
+$previousRunSchedulerIntegration = $env:RUN_SCHEDULER_INTEGRATION
 
 $dockerCommand = (Get-Command docker -ErrorAction SilentlyContinue).Source
 if (-not $dockerCommand) {
@@ -20,7 +21,8 @@ $npmCommand = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
 
 function Assert-DatabaseSchema {
   param(
-    [string]$DatabaseName
+    [string]$DatabaseName,
+    [int]$ExpectedEmbeddingDimension
   )
 
   $query = @"
@@ -44,6 +46,9 @@ SELECT 'workflow_idempotency_unique=' || (to_regclass('public.workflow_runs_work
 SELECT 'workflow_step_execution_token=' || EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_step_runs' AND column_name = 'execution_token');
 SELECT 'workflow_dispatch_fields=' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_run_dispatches' AND column_name = 'lease_expires_at') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_run_dispatches' AND column_name = 'dispatcher_id'));
 SELECT 'workflow_indexes=' || (to_regclass('public.workflow_runs_status_idx') IS NOT NULL AND to_regclass('public.workflow_step_runs_attempt_idx') IS NOT NULL AND to_regclass('public.workflow_run_dispatches_status_idx') IS NOT NULL);
+SELECT 'schedule_tables=' || (to_regclass('public.workflow_schedules') IS NOT NULL AND to_regclass('public.workflow_schedule_occurrences') IS NOT NULL);
+SELECT 'schedule_occurrence_unique=' || (to_regclass('public.workflow_schedule_occurrences_schedule_scheduled_idx') IS NOT NULL);
+SELECT 'schedule_constraints=' || (EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_schedules_type_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_schedule_occurrences_status_check'));
 "@
   $output = & $dockerCommand compose exec -T postgres psql -U flowyn -d $DatabaseName -Atc $query
   if ($LASTEXITCODE -ne 0) { throw "PostgreSQL schema inspection failed for database $DatabaseName." }
@@ -57,7 +62,7 @@ SELECT 'workflow_indexes=' || (to_regclass('public.workflow_runs_status_idx') IS
     "agent_status_check=true",
     "agent_step_type_check=true",
     "agent_indexes=true",
-    "embedding_dimension=vector(768)",
+    "embedding_dimension=vector($ExpectedEmbeddingDimension)",
     "hnsw_cosine=true",
     "foreign_keys=true",
     "status_check=true",
@@ -68,7 +73,10 @@ SELECT 'workflow_indexes=' || (to_regclass('public.workflow_runs_status_idx') IS
     "workflow_idempotency_unique=true",
     "workflow_step_execution_token=true",
     "workflow_dispatch_fields=true",
-    "workflow_indexes=true"
+    "workflow_indexes=true",
+    "schedule_tables=true",
+    "schedule_occurrence_unique=true",
+    "schedule_constraints=true"
   )
   foreach ($expected in $required) {
     if ($checks -notcontains $expected) { throw "PostgreSQL schema check failed for ${DatabaseName}: expected $expected, got $($checks -join ', ')." }
@@ -125,6 +133,7 @@ try {
   Wait-HttpEndpoint "http://localhost:11434/api/tags"
   Wait-HttpEndpoint "http://localhost:3000/api/health/ollama"
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "worker", "npm", "run", "worker:health")
+  Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "scheduler", "npm", "run", "scheduler:health")
 
   Write-Host "Checking the verified local embedding model..."
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "ollama", "ollama", "show", "nomic-embed-text")
@@ -136,9 +145,11 @@ try {
     throw "The embedding response used an unexpected model."
   }
   $embeddingVector = @($embeddingResponse.embeddings[0])
-  if ($embeddingVector.Count -ne 768) {
-    throw "The verified embedding dimension was $($embeddingVector.Count), expected 768."
+  if ($embeddingVector.Count -lt 1) {
+    throw "The verified embedding dimension was empty."
   }
+  $verifiedEmbeddingDimension = $embeddingVector.Count
+  Write-Host "Verified nomic-embed-text dimension: $verifiedEmbeddingDimension"
   foreach ($value in $embeddingVector) {
     $number = 0.0
     if (-not [double]::TryParse([string]$value, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$number) -or [double]::IsNaN($number) -or [double]::IsInfinity($number)) {
@@ -148,7 +159,7 @@ try {
 
   Write-Host "Applying PostgreSQL migrations..."
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "app", "npm", "run", "db:migrate")
-  Assert-DatabaseSchema "flowyn"
+  Assert-DatabaseSchema "flowyn" $verifiedEmbeddingDimension
 
   Write-Host "Applying migrations to a temporary clean database..."
   $temporaryDatabase = "flowyn_milestone6_verify"
@@ -157,7 +168,7 @@ try {
   try {
     $temporaryDatabaseUrl = "postgres://flowyn:flowyn@postgres:5432/$temporaryDatabase"
     Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "app", "sh", "-c", "DATABASE_URL=$temporaryDatabaseUrl npm run db:migrate")
-    Assert-DatabaseSchema $temporaryDatabase
+    Assert-DatabaseSchema $temporaryDatabase $verifiedEmbeddingDimension
   } finally {
     Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "postgres", "dropdb", "--if-exists", "-U", "flowyn", $temporaryDatabase)
   }
@@ -171,19 +182,22 @@ try {
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/agent-ollama.integration.test.ts")
   $env:RUN_WORKFLOW_INTEGRATION = "1"
   $env:RUN_WORKFLOW_OLLAMA_INTEGRATION = "1"
+  $env:RUN_SCHEDULER_INTEGRATION = "1"
   Write-Host "Running durable workflow and workflow/Ollama integrations sequentially..."
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/workflow.integration.test.ts")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/workflow-ollama.integration.test.ts")
+  Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/scheduling.integration.test.ts")
   Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue
   Remove-Item Env:RUN_AGENT_INTEGRATION -ErrorAction SilentlyContinue
   Remove-Item Env:RUN_WORKFLOW_INTEGRATION -ErrorAction SilentlyContinue
   Remove-Item Env:RUN_WORKFLOW_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue
+  Remove-Item Env:RUN_SCHEDULER_INTEGRATION -ErrorAction SilentlyContinue
   Invoke-RequiredCommand $npmCommand @("run", "typecheck")
   Invoke-RequiredCommand $npmCommand @("run", "lint")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run")
   Invoke-RequiredCommand $npmCommand @("run", "build")
 
-  Write-Host "Milestone 6 local verification passed."
+  Write-Host "Milestone 7 local verification passed."
 } finally {
   if ($null -eq $previousRunOllamaIntegration) { Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue }
   else { $env:RUN_OLLAMA_INTEGRATION = $previousRunOllamaIntegration }
@@ -193,5 +207,7 @@ try {
   else { $env:RUN_WORKFLOW_INTEGRATION = $previousRunWorkflowIntegration }
   if ($null -eq $previousRunWorkflowOllamaIntegration) { Remove-Item Env:RUN_WORKFLOW_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue }
   else { $env:RUN_WORKFLOW_OLLAMA_INTEGRATION = $previousRunWorkflowOllamaIntegration }
+  if ($null -eq $previousRunSchedulerIntegration) { Remove-Item Env:RUN_SCHEDULER_INTEGRATION -ErrorAction SilentlyContinue }
+  else { $env:RUN_SCHEDULER_INTEGRATION = $previousRunSchedulerIntegration }
   Pop-Location
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getBrand } from "@/lib/brands/service";
+import { getBrand, getBrandForWorkspace } from "@/lib/brands/service";
 import { getDatabase } from "@/lib/database";
 import { AppError } from "@/lib/security/errors";
 import type { AgentTool, ToolExecutionResult } from "@/lib/agents/registry";
@@ -32,7 +32,12 @@ export const getBrandProfileTool: AgentTool<Record<string, never>, BrandProfileO
   inputJsonSchema: { type: "object", additionalProperties: false, properties: {} },
   async execute(_input, context): Promise<ToolExecutionResult<BrandProfileObservation>> {
     if (!context.brandId) throw new AppError("AGENT_TOOL_CONTEXT_MISSING", 400, "This agent tool requires an authorized brand.");
-    const brand = await getBrand(context.userId, context.brandId, getDatabase());
+    const brand = context.principal?.kind === "workspace_automation"
+      ? await getBrandForWorkspace(context.workspaceId, context.brandId, getDatabase())
+      : context.userId
+        ? await getBrand(context.userId, context.brandId, getDatabase())
+        : null;
+    if (!brand) throw new AppError("AGENT_TOOL_CONTEXT_MISSING", 500, "The agent execution principal is missing.");
     if (brand.workspaceId !== context.workspaceId) throw new AppError("RESOURCE_NOT_FOUND", 404, "Resource not found.");
     const modelObservation: BrandProfileObservation = {
       name: brand.name,

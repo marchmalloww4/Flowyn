@@ -4,13 +4,15 @@ import type { LLMProvider } from "@/lib/ai/types";
 import { agentDecisionSchema, type AgentDecision } from "@/lib/agents/decisions";
 import { buildAgentPrompt } from "@/lib/agents/prompt";
 import { createDefaultToolRegistry, type ToolRegistry } from "@/lib/agents/registry";
-import { completeAgentRun, failAgentRun, recordAgentRunStep, startAgentRun, type AgentRun, type AgentRunStepInput } from "@/lib/agents/service";
+import { completeAgentRun, failAgentRun, recordAgentRunStep, startAgentRun, startAgentRunForPrincipal, type AgentRun, type AgentRunStepInput } from "@/lib/agents/service";
 import { agentRunSchema } from "@/lib/agents/validation";
 import { getDatabase, type Database } from "@/lib/database";
 import { AppError } from "@/lib/security/errors";
+import { userExecutionPrincipal, type ExecutionPrincipal } from "@/lib/security/principal";
 
 export interface RunAgentInput {
-  userId: string;
+  userId?: string;
+  principal?: ExecutionPrincipal;
   agentId: string;
   goal: string;
   provider?: LLMProvider;
@@ -145,7 +147,11 @@ async function recordStep(input: AgentRunStepInput, db: Database): Promise<void>
 export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult> {
   const db = input.db ?? createDatabaseFacade(getDatabase());
   const parsedGoal = agentRunSchema.parse({ goal: input.goal });
-  const started = await startAgentRun(input.userId, input.agentId, parsedGoal.goal, db);
+  const principal = input.principal ?? (input.userId ? userExecutionPrincipal(input.userId) : undefined);
+  if (!principal) throw new AppError("AGENT_PRINCIPAL_REQUIRED", 500, "Agent execution requires a verified execution principal.");
+  const started = principal.kind === "workspace_automation"
+    ? await startAgentRunForPrincipal(principal, input.agentId, parsedGoal.goal, db)
+    : await startAgentRun(principal.userId, input.agentId, parsedGoal.goal, db);
   await input.onRunCreated?.(started.run);
   const provider = input.provider ?? getAIProvider();
   const registry = input.registry ?? createDefaultToolRegistry();
@@ -257,7 +263,8 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult>
       const toolResult = await runWithTimeout(
         (signal) => tool.execute(parsedToolInput, {
           workspaceId: started.agent.workspaceId,
-          userId: input.userId,
+          userId: principal.kind === "user" ? principal.userId : null,
+          principal,
           agentId: started.agent.id,
           runId: started.run.id,
           ...(started.agent.brandId ? { brandId: started.agent.brandId } : {}),

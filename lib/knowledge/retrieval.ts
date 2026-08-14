@@ -1,5 +1,5 @@
 import { and, asc, eq, sql } from "drizzle-orm";
-import { getBrand } from "@/lib/brands/service";
+import { getBrand, getBrandForWorkspace } from "@/lib/brands/service";
 import { getEmbeddingConfig } from "@/lib/embeddings/config";
 import { OllamaEmbeddingProvider } from "@/lib/embeddings/ollama-provider";
 import type { EmbeddingProvider } from "@/lib/embeddings/types";
@@ -23,10 +23,9 @@ function vectorLiteral(vector: number[]): string {
   return `[${vector.join(",")}]`;
 }
 
-export async function retrieveKnowledge(input: { userId: string; brandId: string; query: string; topK: number }, db: Database = getDatabase(), provider: EmbeddingProvider = new OllamaEmbeddingProvider()): Promise<RetrievedKnowledge[]> {
+async function retrieveKnowledgeForBrand(input: { workspaceId: string; brandId: string; query: string; topK: number }, db: Database, provider: EmbeddingProvider): Promise<RetrievedKnowledge[]> {
   if (!input.query.trim()) throw new AppError("INVALID_KNOWLEDGE_QUERY", 400, "A retrieval query is required.");
   if (!Number.isInteger(input.topK) || input.topK < 1 || input.topK > 20) throw new AppError("INVALID_KNOWLEDGE_TOP_K", 400, "topK must be between 1 and 20.");
-  const brand = await getBrand(input.userId, input.brandId, db);
   const queryVector = await provider.embedText(input.query);
   const literal = vectorLiteral(queryVector);
   const distance = sql<number>`${knowledgeChunks.embedding} <=> ${literal}::vector`;
@@ -40,9 +39,19 @@ export async function retrieveKnowledge(input: { userId: string; brandId: string
     metadata: knowledgeChunks.metadata,
     similarity: sql<number>`1 - (${distance})`,
   }).from(knowledgeChunks).innerJoin(knowledgeDocuments, eq(knowledgeChunks.documentId, knowledgeDocuments.id)).where(and(
-    eq(knowledgeChunks.workspaceId, brand.workspaceId),
-    eq(knowledgeChunks.brandId, brand.id),
+    eq(knowledgeChunks.workspaceId, input.workspaceId),
+    eq(knowledgeChunks.brandId, input.brandId),
     eq(knowledgeDocuments.status, "READY"),
   )).orderBy(distance, asc(knowledgeChunks.stableKey)).limit(input.topK);
   return rows;
+}
+
+export async function retrieveKnowledge(input: { userId: string; brandId: string; query: string; topK: number }, db: Database = getDatabase(), provider: EmbeddingProvider = new OllamaEmbeddingProvider()): Promise<RetrievedKnowledge[]> {
+  const brand = await getBrand(input.userId, input.brandId, db);
+  return retrieveKnowledgeForBrand({ workspaceId: brand.workspaceId, brandId: brand.id, query: input.query, topK: input.topK }, db, provider);
+}
+
+export async function retrieveKnowledgeForWorkspace(input: { workspaceId: string; brandId: string; query: string; topK: number }, db: Database = getDatabase(), provider: EmbeddingProvider = new OllamaEmbeddingProvider()): Promise<RetrievedKnowledge[]> {
+  const brand = await getBrandForWorkspace(input.workspaceId, input.brandId, db);
+  return retrieveKnowledgeForBrand({ workspaceId: brand.workspaceId, brandId: brand.id, query: input.query, topK: input.topK }, db, provider);
 }

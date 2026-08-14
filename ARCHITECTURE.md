@@ -1,6 +1,6 @@
 # Architecture
 
-## Milestone 6 boundary
+## Milestone 7 boundary
 
 Flowyn is intentionally a modular monolith. Milestones 1 through 4 establish the runtime, authentication, tenant boundary, role-aware membership management, brand foundation, audit trail, provider-agnostic local AI, verified local embeddings, pgvector knowledge, and bounded RAG—not the eventual automation engine.
 
@@ -19,7 +19,13 @@ graph TD
   Runner --> Registry[Trusted ToolRegistry]
   Runner --> Provider
   Runner --> DB
-  Next --> Redis[(Redis provisioned for later queues)]
+  Next --> Redis[(Redis)]
+  Scheduler[Dedicated Scheduler] --> DB
+  Scheduler --> Redis
+  Scheduler --> Outbox[Workflow Outbox]
+  Outbox --> Queue[BullMQ]
+  Queue --> Worker[Workflow Worker]
+  Worker --> Runner
 ```
 
 ## Request flow
@@ -51,6 +57,7 @@ graph TD
 - `lib/embeddings`: verified-dimension embedding contract, typed errors, configuration, and Ollama implementation.
 - `lib/knowledge`: sanitized document storage, deterministic chunking, indexing, SQL retrieval, and hybrid BrandContext.
 - `lib/agents`: soft-deletable definitions, trusted effective-tool filtering, bounded prompt construction, synchronous runner, safe run history, and brand-scoped internal tools.
+- `lib/schedules`: schedule validation, timezone-aware calculation, bounded misfire policy, atomic occurrence processing, scheduler runtime, and heartbeat health.
 - `lib/security`: application error envelope and validation-safe responses.
 
 Business logic belongs in these modules, not in React components.
@@ -67,13 +74,23 @@ The worker claims queued or stale running runs with a random execution token and
 
 Durable outputs are bounded JSON values stored separately from safe metadata. Metadata contains only operational facts such as operation, counts, model name, duration, and error code. Hidden reasoning, raw observations, credentials, unrestricted tool output, dynamic code, shell, arbitrary SQL, filesystem, HTTP, and browser execution are out of scope.
 
+## Durable workflow scheduling
+
+workflow_schedules is the authoritative schedule state. workflow_schedule_occurrences records each logical scheduled instant with a unique (schedule_id, scheduled_for) constraint. PostgreSQL claims due schedules with short FOR UPDATE SKIP LOCKED transactions. A transaction records the occurrence, reuses workflow snapshot/run/outbox creation, advances the schedule, and commits without executing a step or calling Ollama.
+
+The dedicated scheduler process polls PostgreSQL and uses Redis only for its liveness heartbeat. The existing outbox dispatcher publishes the created run to BullMQ, and the existing worker executes it. Duplicate scheduler processes are safe because occurrence uniqueness and workflow idempotency use a deterministic schedule/instant key.
+
+CRON accepts five fields and stores UTC instants with an IANA timezone. INTERVAL uses bounded seconds, and ONE_TIME consumes itself after a triggered or skipped occurrence. SKIP and FIRE_ONCE never backfill an unbounded history. Observed cron-parser DST behavior is contractual through tests.
+
+Scheduled AI and Agent steps reuse LLMProvider, BrandContext/RAG, and the controlled AgentRunner through a workspace automation principal. No user record is fabricated and workflow_runs.started_by remains NULL. The schedule and occurrence provide the verified workspace/schedule scope to the executor.
+
 ## Tenant isolation
 
 A workspace is the authorization boundary. Every brand query first resolves the brand’s workspace, then checks membership for the authenticated user. A client-provided resource ID is never sufficient for access. Unauthorized workspace resources return 404 to avoid exposing their existence.
 
 ## Data model
 
-Milestone 6 includes Better Auth tables plus:
+Milestones 6 and 7 include Better Auth tables plus:
 
 - `workspaces` and `workspace_members`.
 - `brands`, `brand_voice_profiles`, `brand_rules`, and `brand_examples`.
@@ -87,6 +104,8 @@ Milestone 6 includes Better Auth tables plus:
 
 Structured future Brand DNA fields are stored in JSONB where the shape is expected to evolve. Normalized rules and examples remain separate so later ingestion and analysis can attach provenance.
 
+The schedule tables are workflow_schedules and workflow_schedule_occurrences. The latter stores bounded trigger outcomes and links to workflow runs; its unique schedule/instant key is the duplicate barrier.
+
 ## Runtime services
 
 Compose starts:
@@ -95,6 +114,7 @@ Compose starts:
   - `postgres`: pgvector-capable PostgreSQL 16 with a named data volume.
 - `redis`: Redis 7 with append-only persistence; no BullMQ worker exists in Milestone 3.
 - `ollama`: local inference server with a named model volume.
+- `scheduler`: dedicated database-backed schedule poller with a Redis heartbeat; it shares the app image and does not add a queue, database, Ollama instance, or volume.
 
 The host Next.js process can use localhost URLs from `.env.local`; the Compose app uses Docker service names.
 
@@ -118,6 +138,8 @@ Protected routes use the Better Auth session:
 Mutation routes record sanitized audit events for workspace, membership, and brand changes. The `workspaceId` on brand creation is checked against the authenticated user's membership; it is never treated as proof of access.
 
 `POST /api/ai/generate` requires the authenticated user to provide a workspace ID. Optional brand context is resolved through the authorized brand service and must belong to that workspace. Complete responses use JSON; `stream: true` returns native provider chunks as Server-Sent Events. Generation logs retain only safe operational metadata.
+
+Schedule routes are GET/POST /api/workflow-schedules, GET/PATCH/DELETE /api/workflow-schedules/:id, POST /api/workflow-schedules/:id/enable, POST /api/workflow-schedules/:id/disable, and GET /api/workflow-schedules/:id/occurrences. Members can read schedules and history; admins and owners can mutate schedules. Every schedule, workflow, occurrence, and run lookup is checked against the authenticated workspace.
 
 Knowledge routes are protected by the same session and workspace boundary: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/:id`, `POST /api/knowledge/:id/reindex`, and `POST /api/knowledge/retrieve`. Client workspace and brand IDs are validated but never trusted without server-side brand ownership and membership checks. Embeddings are never returned to clients.
 

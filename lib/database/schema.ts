@@ -241,6 +241,9 @@ export const agentRunSteps = pgTable("agent_run_steps", {
 export type WorkflowStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCEL_REQUESTED" | "CANCELLED" | "TIMED_OUT";
 export type WorkflowStepRunStatus = "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "INTERRUPTED";
 export type WorkflowDispatchStatus = "PENDING" | "CLAIMED" | "DISPATCHED" | "FAILED";
+export type WorkflowScheduleType = "CRON" | "INTERVAL" | "ONE_TIME";
+export type WorkflowScheduleMisfirePolicy = "SKIP" | "FIRE_ONCE";
+export type WorkflowScheduleOccurrenceStatus = "TRIGGERED" | "SKIPPED" | "FAILED";
 
 export const workflows = pgTable("workflows", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -301,6 +304,54 @@ export const workflowRuns = pgTable("workflow_runs", {
   idempotencyIdx: uniqueIndex("workflow_runs_workspace_idempotency_idx").on(table.workspaceId, table.idempotencyKey),
   statusCheck: check("workflow_runs_status_check", sql`${table.status} in ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCEL_REQUESTED', 'CANCELLED', 'TIMED_OUT')`),
   versionCheck: check("workflow_runs_version_check", sql`${table.workflowVersion} > 0`),
+}));
+
+export const workflowSchedules = pgTable("workflow_schedules", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  workflowId: uuid("workflow_id").notNull().references(() => workflows.id, { onDelete: "cascade" }),
+  type: text("type").$type<WorkflowScheduleType>().notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  cronExpression: text("cron_expression"),
+  intervalSeconds: integer("interval_seconds"),
+  runAt: timestamp("run_at", { withTimezone: true }),
+  timezone: text("timezone").notNull().default("UTC"),
+  misfirePolicy: text("misfire_policy").$type<WorkflowScheduleMisfirePolicy>().notNull().default("SKIP"),
+  input: jsonb("input").$type<JsonValue>().notNull().default({}),
+  nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+  lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }),
+  lastProcessedAt: timestamp("last_processed_at", { withTimezone: true }),
+  createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+  ...timestamps,
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+}, (table) => ({
+  workspaceIdx: index("workflow_schedules_workspace_idx").on(table.workspaceId),
+  dueIdx: index("workflow_schedules_due_idx").on(table.enabled, table.nextRunAt),
+  workflowIdx: index("workflow_schedules_workflow_idx").on(table.workflowId),
+  typeCheck: check("workflow_schedules_type_check", sql`${table.type} in ('CRON', 'INTERVAL', 'ONE_TIME')`),
+  misfirePolicyCheck: check("workflow_schedules_misfire_policy_check", sql`${table.misfirePolicy} in ('SKIP', 'FIRE_ONCE')`),
+  intervalCheck: check("workflow_schedules_interval_check", sql`(
+    (${table.type} = 'CRON' and ${table.cronExpression} is not null and ${table.intervalSeconds} is null and ${table.runAt} is null)
+    or (${table.type} = 'INTERVAL' and ${table.cronExpression} is null and ${table.intervalSeconds} is not null and ${table.runAt} is null)
+    or (${table.type} = 'ONE_TIME' and ${table.cronExpression} is null and ${table.intervalSeconds} is null and ${table.runAt} is not null)
+  )`),
+}));
+
+export const workflowScheduleOccurrences = pgTable("workflow_schedule_occurrences", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  scheduleId: uuid("schedule_id").notNull().references(() => workflowSchedules.id, { onDelete: "cascade" }),
+  scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+  status: text("status").$type<WorkflowScheduleOccurrenceStatus>().notNull(),
+  workflowRunId: uuid("workflow_run_id").references(() => workflowRuns.id, { onDelete: "set null" }),
+  reasonCode: text("reason_code"),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  scheduleScheduledUnique: uniqueIndex("workflow_schedule_occurrences_schedule_scheduled_idx").on(table.scheduleId, table.scheduledFor),
+  workspaceIdx: index("workflow_schedule_occurrences_workspace_idx").on(table.workspaceId, table.createdAt),
+  runIdx: index("workflow_schedule_occurrences_run_idx").on(table.workflowRunId),
+  statusCheck: check("workflow_schedule_occurrences_status_check", sql`${table.status} in ('TRIGGERED', 'SKIPPED', 'FAILED')`),
 }));
 
 export const workflowStepRuns = pgTable("workflow_step_runs", {
@@ -405,6 +456,8 @@ export const workspaceRelations = relations(workspaces, ({ many }) => ({
   workflowVersions: many(workflowVersions),
   workflowRuns: many(workflowRuns),
   workflowStepRuns: many(workflowStepRuns),
+  workflowSchedules: many(workflowSchedules),
+  workflowScheduleOccurrences: many(workflowScheduleOccurrences),
 }));
 
 export const brandRelations = relations(brands, ({ one, many }) => ({
@@ -441,6 +494,7 @@ export const workflowRelations = relations(workflows, ({ one, many }) => ({
   creator: one(user, { fields: [workflows.createdBy], references: [user.id] }),
   versions: many(workflowVersions),
   runs: many(workflowRuns),
+  schedules: many(workflowSchedules),
 }));
 
 export const workflowVersionRelations = relations(workflowVersions, ({ one, many }) => ({
@@ -457,6 +511,20 @@ export const workflowRunRelations = relations(workflowRuns, ({ one, many }) => (
   starter: one(user, { fields: [workflowRuns.startedBy], references: [user.id] }),
   steps: many(workflowStepRuns),
   dispatch: one(workflowRunDispatches),
+  scheduleOccurrences: many(workflowScheduleOccurrences),
+}));
+
+export const workflowScheduleRelations = relations(workflowSchedules, ({ one, many }) => ({
+  workspace: one(workspaces, { fields: [workflowSchedules.workspaceId], references: [workspaces.id] }),
+  workflow: one(workflows, { fields: [workflowSchedules.workflowId], references: [workflows.id] }),
+  creator: one(user, { fields: [workflowSchedules.createdBy], references: [user.id] }),
+  occurrences: many(workflowScheduleOccurrences),
+}));
+
+export const workflowScheduleOccurrenceRelations = relations(workflowScheduleOccurrences, ({ one }) => ({
+  workspace: one(workspaces, { fields: [workflowScheduleOccurrences.workspaceId], references: [workspaces.id] }),
+  schedule: one(workflowSchedules, { fields: [workflowScheduleOccurrences.scheduleId], references: [workflowSchedules.id] }),
+  workflowRun: one(workflowRuns, { fields: [workflowScheduleOccurrences.workflowRunId], references: [workflowRuns.id] }),
 }));
 
 export const workflowStepRunRelations = relations(workflowStepRuns, ({ one }) => ({
@@ -500,6 +568,8 @@ export const schema = {
   workflows,
   workflowVersions,
   workflowRuns,
+  workflowSchedules,
+  workflowScheduleOccurrences,
   workflowStepRuns,
   workflowRunDispatches,
   knowledgeDocuments,

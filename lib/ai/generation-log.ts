@@ -4,7 +4,7 @@ export type GenerationStatus = "SUCCEEDED" | "FAILED";
 
 export interface GenerationLogInput {
   workspaceId: string;
-  userId: string;
+  userId: string | null;
   provider: string;
   model: string;
   status: GenerationStatus;

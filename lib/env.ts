@@ -37,6 +37,12 @@ const envSchema = z.object({
   WORKFLOW_DISPATCH_LEASE_MS: z.coerce.number().int().positive().max(300000).default(30000),
   WORKFLOW_EXECUTION_LEASE_MS: z.coerce.number().int().positive().max(600000).default(90000),
   WORKFLOW_WORKER_CONCURRENCY: z.coerce.number().int().positive().max(32).default(1),
+  SCHEDULER_POLL_INTERVAL_MS: z.coerce.number().int().positive().max(300000).default(5000),
+  SCHEDULER_BATCH_SIZE: z.coerce.number().int().positive().max(100).default(25),
+  SCHEDULER_HEARTBEAT_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(30),
+  SCHEDULE_MISFIRE_GRACE_SECONDS: z.coerce.number().int().nonnegative().max(86400).default(60),
+  SCHEDULE_MIN_INTERVAL_SECONDS: z.coerce.number().int().positive().max(31536000).default(60),
+  SCHEDULE_MAX_INTERVAL_SECONDS: z.coerce.number().int().positive().max(31536000).default(31536000),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

@@ -4,15 +4,17 @@ import { recordGenerationLog } from "@/lib/ai/generation-log";
 import { OllamaProvider } from "@/lib/ai/ollama-provider";
 import { buildPrompt } from "@/lib/ai/prompt";
 import type { LLMGenerateInput, LLMProvider, LLMResult, LLMStreamChunk } from "@/lib/ai/types";
-import { getBrand } from "@/lib/brands/service";
+import { getBrand, getBrandForWorkspace } from "@/lib/brands/service";
 import { getDatabase, type Database } from "@/lib/database";
 import { requireWorkspaceMember } from "@/lib/authz/authorization";
-import { getBrandContext } from "@/lib/knowledge/brand-context";
+import { getBrandContext, getBrandContextForPrincipal } from "@/lib/knowledge/brand-context";
 import { AppError } from "@/lib/security/errors";
+import { userExecutionPrincipal, type ExecutionPrincipal } from "@/lib/security/principal";
 
 export interface GenerationRequest {
-  userId: string;
+  userId?: string;
   workspaceId: string;
+  principal?: ExecutionPrincipal;
   brandId?: string;
   prompt: string;
   system?: string;
@@ -27,8 +29,21 @@ export interface PreparedGeneration {
   providerInput: LLMGenerateInput;
   config: AIConfig;
   workspaceId: string;
-  userId: string;
+  userId: string | null;
+  principal: ExecutionPrincipal;
   inputChars: number;
+}
+
+function resolvePrincipal(input: GenerationRequest): ExecutionPrincipal {
+  const principal = input.principal ?? (input.userId ? userExecutionPrincipal(input.userId) : undefined);
+  if (!principal) throw new AppError("AI_PRINCIPAL_REQUIRED", 500, "AI execution requires a verified execution principal.");
+  if (principal.kind === "workspace_automation" && principal.workspaceId !== input.workspaceId) {
+    throw new AppError("RESOURCE_NOT_FOUND", 404, "Resource not found.");
+  }
+  if (principal.kind === "user" && input.userId && principal.userId !== input.userId) {
+    throw new AppError("AI_PRINCIPAL_INVALID", 500, "The AI execution principal does not match the user context.");
+  }
+  return principal;
 }
 
 export function getAIProvider(): LLMProvider {
@@ -40,17 +55,23 @@ export function getAIProvider(): LLMProvider {
 export const getLLMProvider = getAIProvider;
 
 export async function prepareGeneration(input: GenerationRequest, provider: LLMProvider = getAIProvider(), db: Database = getDatabase()): Promise<PreparedGeneration> {
-  await requireWorkspaceMember(input.userId, input.workspaceId, db);
+  const principal = resolvePrincipal(input);
+  const principalUserId = principal.kind === "user" ? principal.userId : null;
+  if (principalUserId) await requireWorkspaceMember(principalUserId, input.workspaceId, db);
   const config = getAIConfig();
   let brandContext;
   if (input.useBrandContext && !input.brandId) throw new InvalidRequestError("A brand is required when brand context is enabled.");
   if (input.brandId) {
-    const brand = await getBrand(input.userId, input.brandId, db);
+    const brand = principal.kind === "workspace_automation"
+      ? await getBrandForWorkspace(input.workspaceId, input.brandId, db)
+      : await getBrand(principal.userId, input.brandId, db);
     if (brand.workspaceId !== input.workspaceId) throw new AppError("RESOURCE_NOT_FOUND", 404, "Resource not found.");
     brandContext = brand;
   }
   if (input.useBrandContext && input.brandId) {
-    const hybridContext = await getBrandContext({ userId: input.userId, brandId: input.brandId, query: input.prompt, includeKnowledge: true }, db);
+    const hybridContext = principal.kind === "workspace_automation"
+      ? await getBrandContextForPrincipal({ principal, workspaceId: input.workspaceId, brandId: input.brandId, query: input.prompt, includeKnowledge: true }, db)
+      : await getBrandContext({ userId: principal.userId, brandId: input.brandId, query: input.prompt, includeKnowledge: true }, db);
     brandContext = { ...hybridContext.brand, retrievedKnowledge: hybridContext.knowledge };
   }
   const built = buildPrompt({
@@ -71,7 +92,8 @@ export async function prepareGeneration(input: GenerationRequest, provider: LLMP
     },
     config,
     workspaceId: input.workspaceId,
-    userId: input.userId,
+    userId: principalUserId,
+    principal,
     inputChars: built.totalChars,
   };
 }

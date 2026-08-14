@@ -25,6 +25,12 @@ export async function getBrand(userId: string, brandId: string, db: Database = g
   return brand;
 }
 
+export async function getBrandForWorkspace(workspaceId: string, brandId: string, db: Database = getDatabase()) {
+  const [brand] = await db.select().from(brands).where(and(eq(brands.id, brandId), eq(brands.workspaceId, workspaceId))).limit(1);
+  if (!brand) throw new AppError("RESOURCE_NOT_FOUND", 404, "Resource not found.");
+  return brand;
+}
+
 export async function updateBrand(userId: string, brandId: string, input: BrandPatch, db: Database = getDatabase()) {
   const existing = await getBrand(userId, brandId, db);
   await requireWorkspaceAction(userId, existing.workspaceId, "brand.write", db);

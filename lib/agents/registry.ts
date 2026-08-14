@@ -3,10 +3,12 @@ import type { LLMJsonSchema } from "@/lib/ai/types";
 import { AppError } from "@/lib/security/errors";
 import { getBrandProfileTool } from "@/lib/agents/tools/get-brand-profile";
 import { searchBrandKnowledgeTool } from "@/lib/agents/tools/search-brand-knowledge";
+import type { ExecutionPrincipal } from "@/lib/security/principal";
 
 export interface ToolExecutionContext {
   workspaceId: string;
-  userId: string;
+  userId: string | null;
+  principal?: ExecutionPrincipal;
   agentId: string;
   runId: string;
   brandId?: string;

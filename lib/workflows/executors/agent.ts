@@ -5,6 +5,7 @@ import { createWorkflowContext, resolveWorkflowValue, sanitizeWorkflowValue } fr
 import { getWorkflowExecutionPolicy } from "@/lib/workflows/policy";
 import { expressionSchema } from "@/lib/workflows/validation";
 import type { AgentConfig, WorkflowStepExecutor } from "@/lib/workflows/types";
+import { userExecutionPrincipal } from "@/lib/security/principal";
 
 const agentConfigSchema = z.object({ agentId: z.string().uuid(), goal: expressionSchema }).strict();
 
@@ -15,9 +16,11 @@ export const agentExecutor: WorkflowStepExecutor<AgentConfig> = {
     const workflowContext = createWorkflowContext({ triggerInput: context.triggerInput, stepOutputs: context.stepOutputs });
     const goal = resolveWorkflowValue(config.goal, workflowContext);
     if (typeof goal !== "string" || !goal.trim()) throw new WorkflowStepError("WORKFLOW_AGENT_INPUT_INVALID", 400, "AGENT goal must resolve to a non-empty string.");
+    const principal = context.principal ?? (context.actorUserId ? userExecutionPrincipal(context.actorUserId) : undefined);
+    if (!principal) throw new WorkflowStepError("WORKFLOW_PRINCIPAL_MISSING", 500, "The workflow execution principal is missing.", false);
     let agentRunId: string | undefined;
     try {
-      const result = await runAgent({ userId: context.actorUserId, agentId: config.agentId, goal, provider: context.provider, db: context.db, abortSignal: context.abortSignal, onRunCreated: async (run) => { agentRunId = run.id; } });
+      const result = await runAgent({ ...(principal.kind === "user" ? { userId: principal.userId } : {}), principal, agentId: config.agentId, goal, provider: context.provider, db: context.db, abortSignal: context.abortSignal, onRunCreated: async (run) => { agentRunId = run.id; } });
       if (result.status === "MAX_STEPS_REACHED" || result.finalResponse === null) throw new WorkflowStepError("AGENT_MAX_STEPS", 409, "The subordinate agent reached its step limit.", false, result.runId);
       if (result.finalResponse.length > getWorkflowExecutionPolicy().maxOutputChars) throw new WorkflowStepError("WORKFLOW_OUTPUT_LIMIT", 400, "AGENT output exceeds the configured limit.", false, result.runId);
       const output = sanitizeWorkflowValue(result.finalResponse);

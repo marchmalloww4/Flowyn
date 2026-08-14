@@ -2,11 +2,12 @@ import { createWorkflowContext, sanitizeWorkflowValue } from "@/lib/workflows/co
 import { classifyWorkflowError } from "@/lib/workflows/errors";
 import { getWorkflowExecutionPolicy } from "@/lib/workflows/policy";
 import { createDefaultWorkflowStepRegistry, type WorkflowStepRegistry } from "@/lib/workflows/registry";
-import { claimWorkflowRun, completeWorkflowStepAndAdvance, createWorkflowStepAttempt, failWorkflowStep, finishWorkflowRun, getWorkflowRunRecord, renewWorkflowRunLease, type WorkflowRun, type WorkflowStepRun } from "@/lib/workflows/service";
+import { claimWorkflowRun, completeWorkflowStepAndAdvance, createWorkflowStepAttempt, failWorkflowStep, finishWorkflowRun, getWorkflowRunRecord, renewWorkflowRunLease, resolveWorkflowRunPrincipal, type WorkflowRun, type WorkflowStepRun } from "@/lib/workflows/service";
 import { getDatabase, workflowStepRuns, type Database } from "@/lib/database";
 import { eq } from "drizzle-orm";
 import type { JsonValue, WorkflowStep } from "@/lib/workflows/types";
 import type { LLMProvider } from "@/lib/ai/types";
+import { userExecutionPrincipal } from "@/lib/security/principal";
 
 export interface ExecuteWorkflowRunOptions {
   runId: string;
@@ -54,6 +55,13 @@ export async function executeWorkflowRun(options: ExecuteWorkflowRunOptions): Pr
 
   const run = claimed.run;
   const executionToken = claimed.executionToken;
+  let principal;
+  try {
+    principal = run.startedBy ? userExecutionPrincipal(run.startedBy) : await resolveWorkflowRunPrincipal(run, db);
+  } catch {
+    const failed = await finishWorkflowRun(run.id, executionToken, "FAILED", null, "WORKFLOW_PRINCIPAL_MISSING", db);
+    return failed ? result(run.id, failed, 0, null, "WORKFLOW_PRINCIPAL_MISSING") : result(run.id, run, 0, null, "WORKFLOW_PRINCIPAL_MISSING");
+  }
   const definition = run.definitionSnapshot;
   const steps = await loadCompletedSteps(run.id, db);
   const stepOutputs = completedOutputs(steps);
@@ -123,7 +131,7 @@ export async function executeWorkflowRun(options: ExecuteWorkflowRunOptions): Pr
       try {
         const executor = registry.get(step.type);
         const config = executor.configSchema.parse(step.config);
-        const stepResult = await executor.execute({ runId: run.id, workspaceId: run.workspaceId, actorUserId: run.startedBy ?? "", workflowId: run.workflowId, workflowVersion: run.workflowVersion, triggerInput: run.input, stepOutputs, abortSignal: rootController.signal, db, provider: options.provider }, config);
+        const stepResult = await executor.execute({ runId: run.id, workspaceId: run.workspaceId, actorUserId: principal.kind === "user" ? principal.userId : null, principal, workflowId: run.workflowId, workflowVersion: run.workflowVersion, triggerInput: run.input, stepOutputs, abortSignal: rootController.signal, db, provider: options.provider }, config);
         if (rootController.signal.aborted) {
           if (cancellationRequested) throw new Error("WORKFLOW_CANCELLED");
           if (totalTimedOut) throw new Error("WORKFLOW_TIMEOUT");

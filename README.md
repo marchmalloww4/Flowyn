@@ -2,7 +2,7 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1, 2, 3, 4, 5, and 6**:
+This repository currently contains **Milestones 1, 2, 3, 4, 5, 6, and 7**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -16,9 +16,10 @@ This repository currently contains **Milestones 1, 2, 3, 4, 5, and 6**:
 - A provider-abstracted Ollama health and generation API.
 - Controlled synchronous agents with soft-deleted definitions, bounded decisions, trusted runtime context, an allowlisted tool registry, safe run history, and request cancellation propagation.
 - Durable versioned workflows with bounded JSON graph steps, PostgreSQL snapshots and outbox delivery, BullMQ execution, leases, stale-worker protection, durable cancellation, and safe run history.
+- Durable CRON, interval, and one-time workflow schedules with PostgreSQL occurrence uniqueness, bounded misfire handling, a dedicated scheduler process, Redis heartbeat health, and workspace-scoped schedule history.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, Ollama behavior, agent policy, runner boundaries, protected APIs, and safe persistence.
 
-Scheduling, webhooks, approvals, integrations, billing, visual canvas editing, and general DAG or loop orchestration remain outside Milestone 6 and are intentionally deferred.
+Webhooks, approvals, integrations, billing, visual canvas editing, and general DAG or loop orchestration remain outside Milestone 7 and are intentionally deferred.
 
 ## Quick start
 
@@ -46,7 +47,9 @@ Workspace, brand, agent, and run APIs are protected by the authenticated session
 
 For full setup and troubleshooting, see [SETUP.md](SETUP.md). For architecture decisions, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-The Compose worker service is independently startable and consumes durable workflow jobs. It uses the same application image, a separate BullMQ Redis connection, and a Redis heartbeat checked by npm run worker:health.
+The Compose worker service is independently startable and consumes durable workflow jobs. The scheduler service uses the same application image, PostgreSQL schedule truth, and a Redis heartbeat checked by npm run scheduler:health. No schedule truth is stored in BullMQ repeatable jobs.
+
+Schedule APIs are available at `/api/workflow-schedules`, `/api/workflow-schedules/:id`, and `/api/workflow-schedules/:id/occurrences`; schedule mutation requires workspace ADMIN or OWNER access, while members can read schedules and history.
 
 ## Verification
 
@@ -79,7 +82,9 @@ Workflow endpoints are /api/workflows, /api/workflows/:id/runs, /api/workflow-ru
 - `/api/agents?workspaceId=...`
 - `/api/agent-runs/:id`
 
-Milestone 6 adds lib/workflows for immutable definitions, graph validation, queue/outbox dispatch, executors, leases, and worker lifecycle, plus lib/queue for BullMQ Redis connections. Docker Compose now includes app and worker services.
+The scheduler supports five-field CRON expressions, IANA timezones, intervals from `SCHEDULE_MIN_INTERVAL_SECONDS` through `SCHEDULE_MAX_INTERVAL_SECONDS`, and RFC3339 one-time instants. `SKIP` and `FIRE_ONCE` misfires are bounded by `SCHEDULE_MISFIRE_GRACE_SECONDS`.
+
+Milestones 6 and 7 add lib/workflows for immutable definitions, graph validation, queue/outbox dispatch, executors, leases, worker lifecycle, and schedule-triggered execution, plus lib/queue for BullMQ Redis connections. Docker Compose includes app, worker, and scheduler services.
 
 ## Project structure
 
@@ -94,10 +99,11 @@ lib/ai/              LLM provider contract and Ollama implementation
 lib/embeddings/      Verified-dimension embedding provider and errors
 lib/knowledge/       Chunking, indexing, retrieval, and BrandContext services
 lib/agents/          Bounded runner, trusted tool registry, agent service, and safe run persistence
+lib/schedules/       Schedule validation/calculation, occurrence processing, scheduler runtime, and heartbeat
 db/migrations/       Generated PostgreSQL migrations
 tests/               Vitest tests
 scripts/             Local verification helpers
-docker-compose.yml   Local PostgreSQL, Redis, Ollama, app, and worker services
+docker-compose.yml   Local PostgreSQL, Redis, Ollama, app, worker, and scheduler services
 ```
 
 ## License

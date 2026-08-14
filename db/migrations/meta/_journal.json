@@ -50,6 +50,13 @@
       "when": 1786680926750,
       "tag": "0006_smooth_the_renegades",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786686134575,
+      "tag": "0007_mean_chameleon",
+      "breakpoints": true
     }
   ]
 }

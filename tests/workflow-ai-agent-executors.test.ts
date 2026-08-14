@@ -12,6 +12,7 @@ vi.mock("@/lib/agents/runner", () => ({ runAgent: mocks.runAgent }));
 
 import { agentExecutor } from "@/lib/workflows/executors/agent";
 import { aiGenerateExecutor } from "@/lib/workflows/executors/ai-generate";
+import { workspaceAutomationPrincipal } from "@/lib/security/principal";
 
 const baseContext = {
   runId: "run-1",
@@ -49,5 +50,16 @@ describe("workflow AI and Agent executors", () => {
     const result = await agentExecutor.execute(baseContext, { agentId: "11111111-1111-4111-8111-111111111111", goal: { kind: "literal", value: "answer" } });
     expect(result).toMatchObject({ output: "agent result", agentRunId: "agent-run-1", safeMetadata: { operation: "AGENT", agentRunId: "agent-run-1" } });
     expect(mocks.runAgent).toHaveBeenCalledWith(expect.objectContaining({ agentId: "11111111-1111-4111-8111-111111111111", abortSignal: baseContext.abortSignal, db: baseContext.db }));
+  });
+
+  it("passes a workspace automation principal to scheduled AI and Agent steps without a user ID", async () => {
+    const principal = workspaceAutomationPrincipal("workspace-1", "schedule-1");
+    const context = { ...baseContext, actorUserId: null, principal };
+    await aiGenerateExecutor.execute(context, { prompt: { kind: "literal", value: "hello" } });
+    await agentExecutor.execute(context, { agentId: "11111111-1111-4111-8111-111111111111", goal: { kind: "literal", value: "answer" } });
+    expect(mocks.prepareGeneration).toHaveBeenCalledWith(expect.objectContaining({ principal, workspaceId: "workspace-1" }), expect.anything(), context.db);
+    expect(mocks.prepareGeneration.mock.calls[0]?.[0].userId).toBeUndefined();
+    expect(mocks.runAgent).toHaveBeenCalledWith(expect.objectContaining({ principal }));
+    expect(mocks.runAgent.mock.calls[0]?.[0].userId).toBeUndefined();
   });
 });

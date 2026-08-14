@@ -1,6 +1,7 @@
 import type { ZodType } from "zod";
 import type { Database } from "@/lib/database";
 import type { LLMProvider } from "@/lib/ai/types";
+import type { ExecutionPrincipal } from "@/lib/security/principal";
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
@@ -73,7 +74,8 @@ export interface WorkflowContext {
 export interface WorkflowStepExecutionContext {
   runId: string;
   workspaceId: string;
-  actorUserId: string;
+  actorUserId: string | null;
+  principal?: ExecutionPrincipal;
   workflowId: string;
   workflowVersion: number;
   triggerInput: JsonValue;

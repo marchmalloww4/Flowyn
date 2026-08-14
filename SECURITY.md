@@ -26,11 +26,18 @@
 - Model observations are bounded, escaped, and delimited as untrusted prompt data. Persisted step rows contain only safe summaries; hidden reasoning and raw tool output are not requested or stored.
 - Agent execution has hard step, model-call, tool-call, total-time, observation, goal, and final-response bounds. Request aborts use `AbortSignal`; durable cross-request cancellation is intentionally deferred.
 
-Workflow definitions, request bodies, inputs, references, step configs, and idempotency keys are strict and bounded. Reference paths reject __proto__, prototype, and constructor. Workflow access is workspace-scoped: members may cancel only runs they started, while admins and owners may cancel any cancellable run in their workspace.
+Workflow definitions, request bodies, inputs, references, step configs, and idempotency keys are strict and bounded. Reference paths reject __proto__, prototype, and constructor. Workflow access is workspace-scoped: members may cancel only runs they started, while admins and owners may cancel any cancellable run in their workspace, including scheduled runs whose startedBy is NULL.
 
 Workflow versions and run snapshots are immutable. External agent and brand IDs are re-resolved at execution and must still belong to the workspace; disabled or deleted agents cannot run. Workflow execution uses a static server registry and cannot invoke eval, Function, dynamic modules, shell, arbitrary SQL, filesystem access, arbitrary HTTP, browser automation, or user-selected tools.
 
 Durable workflow output is schema-controlled JSON separate from safe observability metadata. History excludes chain-of-thought, raw observations, credentials, and unrestricted tool data. PostgreSQL execution tokens and leases guard every step and run transition; stale recovery creates a new attempt and prevents an old worker from completing after lease loss.
+
+## Scheduling security
+
+- Workflow schedules and occurrences are workspace-owned, validated server-side, and claimed with PostgreSQL row locks plus a unique schedule/instant constraint. Scheduler heartbeats are liveness metadata only; Redis is not schedule truth.
+- Schedule mutation is restricted to workspace admins/owners; members may read schedule history. CRON is five-field and timezone-aware, intervals are bounded, one-time schedules are terminal, and misfire handling is bounded by server policy.
+- Scheduled workflow runs use a verified workspace automation principal, never a fake user. startedBy, generation log user IDs, subordinate agent starter IDs, and scheduler audit actors remain nullable for automation.
+- Scheduled AI/Agent execution reuses the existing LLMProvider, BrandContext/RAG, and deny-by-default AgentRunner. Client input cannot choose a schedule principal, workspace, user, provider endpoint, model, tool, SQL query, shell command, filesystem path, or arbitrary HTTP target.
 
 ## Credential handling
 

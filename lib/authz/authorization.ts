@@ -22,12 +22,18 @@ export type WorkspaceAction =
   | "workflow.run"
   | "workflow.write"
   | "workflow.delete"
-  | "workflow.cancel";
+  | "workflow.cancel"
+  | "workflow_schedule.read"
+  | "workflow_schedule.create"
+  | "workflow_schedule.update"
+  | "workflow_schedule.enable"
+  | "workflow_schedule.disable"
+  | "workflow_schedule.delete";
 
 export function canPerformWorkspaceAction(role: WorkspaceRole, action: WorkspaceAction): boolean {
   if (role === "OWNER") return true;
-  if (role === "ADMIN") return ["workspace.read", "workspace.update", "membership.manage", "brand.read", "brand.write", "brand.delete", "agent.read", "agent.run", "agent.write", "agent.delete", "workflow.read", "workflow.run", "workflow.write", "workflow.delete", "workflow.cancel"].includes(action);
-  return ["workspace.read", "brand.read", "agent.read", "agent.run", "workflow.read", "workflow.run", "workflow.cancel"].includes(action);
+  if (role === "ADMIN") return ["workspace.read", "workspace.update", "membership.manage", "brand.read", "brand.write", "brand.delete", "agent.read", "agent.run", "agent.write", "agent.delete", "workflow.read", "workflow.run", "workflow.write", "workflow.delete", "workflow.cancel", "workflow_schedule.read", "workflow_schedule.create", "workflow_schedule.update", "workflow_schedule.enable", "workflow_schedule.disable", "workflow_schedule.delete"].includes(action);
+  return ["workspace.read", "brand.read", "agent.read", "agent.run", "workflow.read", "workflow.run", "workflow.cancel", "workflow_schedule.read"].includes(action);
 }
 
 function normalizeRole(role: string): WorkspaceRole {

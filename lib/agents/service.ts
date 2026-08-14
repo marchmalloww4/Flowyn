@@ -7,6 +7,7 @@ import { createDefaultToolRegistry } from "@/lib/agents/registry";
 import { getAgentExecutionPolicy } from "@/lib/agents/policy";
 import { agentCreateSchema, agentPatchSchema, type AgentCreateInput, type AgentPatchInput } from "@/lib/agents/validation";
 import { AppError } from "@/lib/security/errors";
+import type { WorkspaceAutomationPrincipal } from "@/lib/security/principal";
 
 export type AgentDefinition = typeof agents.$inferSelect;
 export type AgentRun = typeof agentRuns.$inferSelect;
@@ -46,6 +47,12 @@ async function loadAgent(userId: string, agentId: string, db: Database): Promise
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.deletedAt))).limit(1);
   if (!agent) throw new AppError("RESOURCE_NOT_FOUND", 404, "Resource not found.");
   await requireWorkspaceMember(userId, agent.workspaceId, db);
+  return agent;
+}
+
+export async function getAgentForWorkspace(workspaceId: string, agentId: string, db: Database = getDatabase()): Promise<AgentDefinition> {
+  const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId), isNull(agents.deletedAt))).limit(1);
+  if (!agent) throw new AppError("RESOURCE_NOT_FOUND", 404, "Resource not found.");
   return agent;
 }
 
@@ -129,6 +136,25 @@ export async function startAgentRun(userId: string, agentId: string, goal: strin
   }).returning();
   if (!run) throw new AppError("AGENT_RUN_CREATE_FAILED", 500, "The agent run could not be created.");
   await recordAuditEvent({ workspaceId: run.workspaceId, actorUserId: userId, action: "agent.run_started", resourceType: "agent_run", resourceId: run.id, metadata: { agentId: agent.id } }, db);
+  return { agent, run, policy };
+}
+
+export async function startAgentRunForPrincipal(principal: WorkspaceAutomationPrincipal, agentId: string, goal: string, db: Database = getDatabase()): Promise<{ agent: AgentDefinition; run: AgentRun; policy: ReturnType<typeof getAgentExecutionPolicy> }> {
+  const agent = await getAgentForWorkspace(principal.workspaceId, agentId, db);
+  if (!agent.enabled) throw new AppError("AGENT_DISABLED", 409, "The agent is disabled.");
+  const policy = getAgentExecutionPolicy(agent.maxSteps);
+  const [run] = await db.insert(agentRuns).values({
+    workspaceId: agent.workspaceId,
+    agentId: agent.id,
+    agentName: agent.name,
+    startedBy: null,
+    status: "RUNNING",
+    goal,
+    stepCount: 0,
+    startedAt: new Date(),
+  }).returning();
+  if (!run) throw new AppError("AGENT_RUN_CREATE_FAILED", 500, "The agent run could not be created.");
+  await recordAuditEvent({ workspaceId: run.workspaceId, actorUserId: null, action: "agent.run_started", resourceType: "agent_run", resourceId: run.id, metadata: { agentId: agent.id, principalKind: principal.kind, scheduleId: principal.scheduleId } }, db);
   return { agent, run, policy };
 }
 
