@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { validateWorkflowGraph } from "@/lib/workflows/graph";
+import { workflowEditorLayoutSchema } from "@/lib/workflows/editor-layout";
 import { WORKFLOW_APPROVAL_MAX_EXPIRATION_SECONDS, WORKFLOW_APPROVAL_MIN_EXPIRATION_SECONDS } from "@/lib/workflows/policy";
+import { stepIdSchema } from "@/lib/workflows/primitives";
 import type { JsonValue, WorkflowDefinition } from "@/lib/workflows/types";
 
 const MAX_JSON_DEPTH = 3;
@@ -17,7 +19,6 @@ function isBoundedJsonValue(value: unknown, depth = 0): value is JsonValue {
 }
 
 const jsonValueSchema = z.custom<JsonValue>((value) => isBoundedJsonValue(value), "The JSON value exceeds workflow bounds.");
-const stepIdSchema = z.string().trim().regex(/^[A-Za-z][A-Za-z0-9_-]{0,79}$/, "Step IDs must be safe identifiers.");
 const pathSchema = z.string().trim().min(1).max(200);
 const uuidSchema = z.string().uuid();
 const expressionSchema = z.union([
@@ -130,8 +131,10 @@ export const workflowPatchSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   description: z.string().trim().max(1000).optional(),
   definition: workflowDefinitionSchema.optional(),
+  expectedVersionId: uuidSchema.optional(),
+  layout: workflowEditorLayoutSchema.optional(),
   enabled: z.boolean().optional(),
-}).strict().refine((value) => Object.keys(value).length > 0, "At least one workflow field is required.");
+}).strict().refine((value) => Object.keys(value).some((key) => key !== "expectedVersionId"), "At least one workflow field is required.");
 
 export const workflowRunSchema = z.object({
   input: jsonValueSchema.default({}),

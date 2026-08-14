@@ -6,7 +6,8 @@ import type { ExecutionPrincipal } from "@/lib/security/principal";
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
-export type WorkflowStepType = "SET_VALUE" | "TRANSFORM" | "CONDITION" | "AI_GENERATE" | "AGENT" | "APPROVAL";
+export const WORKFLOW_STEP_TYPES = ["SET_VALUE", "TRANSFORM", "CONDITION", "AI_GENERATE", "AGENT", "APPROVAL"] as const;
+export type WorkflowStepType = (typeof WORKFLOW_STEP_TYPES)[number];
 export type WorkflowApprovalRole = "OWNER" | "ADMIN";
 
 export interface WorkflowValueExpressionLiteral {

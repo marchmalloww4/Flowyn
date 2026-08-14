@@ -14,6 +14,7 @@ import {
 import type { WorkspaceRole } from "@/lib/workspaces/roles";
 import { embeddingVector } from "@/lib/database/vector";
 import type { JsonValue, WorkflowApprovalRole, WorkflowDefinition } from "@/lib/workflows/types";
+import type { WorkflowEditorLayout } from "@/lib/workflows/editor";
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -277,6 +278,20 @@ export const workflowVersions = pgTable("workflow_versions", {
   workflowVersionIdx: uniqueIndex("workflow_versions_workflow_version_idx").on(table.workflowId, table.version),
   workspaceIdx: index("workflow_versions_workspace_idx").on(table.workspaceId),
   versionCheck: check("workflow_versions_version_check", sql`${table.version} > 0`),
+}));
+
+export const workflowEditorLayouts = pgTable("workflow_editor_layouts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  workflowId: uuid("workflow_id").notNull().references(() => workflows.id, { onDelete: "cascade" }),
+  workflowVersionId: uuid("workflow_version_id").notNull().references(() => workflowVersions.id, { onDelete: "cascade" }),
+  layout: jsonb("layout").$type<WorkflowEditorLayout>().notNull(),
+  updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+  ...timestamps,
+}, (table) => ({
+  workflowIdx: uniqueIndex("workflow_editor_layouts_workflow_idx").on(table.workflowId),
+  workspaceIdx: index("workflow_editor_layouts_workspace_idx").on(table.workspaceId),
+  versionIdx: index("workflow_editor_layouts_version_idx").on(table.workflowVersionId),
 }));
 
 export const workflowRuns = pgTable("workflow_runs", {
@@ -582,6 +597,7 @@ export const workflowRelations = relations(workflows, ({ one, many }) => ({
   runs: many(workflowRuns),
   schedules: many(workflowSchedules),
   webhookTriggers: many(workflowWebhookTriggers),
+  editorLayout: one(workflowEditorLayouts),
 }));
 
 export const workflowVersionRelations = relations(workflowVersions, ({ one, many }) => ({
@@ -589,6 +605,13 @@ export const workflowVersionRelations = relations(workflowVersions, ({ one, many
   workspace: one(workspaces, { fields: [workflowVersions.workspaceId], references: [workspaces.id] }),
   creator: one(user, { fields: [workflowVersions.createdBy], references: [user.id] }),
   runs: many(workflowRuns),
+}));
+
+export const workflowEditorLayoutRelations = relations(workflowEditorLayouts, ({ one }) => ({
+  workspace: one(workspaces, { fields: [workflowEditorLayouts.workspaceId], references: [workspaces.id] }),
+  workflow: one(workflows, { fields: [workflowEditorLayouts.workflowId], references: [workflows.id] }),
+  workflowVersion: one(workflowVersions, { fields: [workflowEditorLayouts.workflowVersionId], references: [workflowVersions.id] }),
+  updater: one(user, { fields: [workflowEditorLayouts.updatedBy], references: [user.id] }),
 }));
 
 export const workflowRunRelations = relations(workflowRuns, ({ one, many }) => ({
@@ -675,6 +698,7 @@ export const schema = {
   agentRunSteps,
   workflows,
   workflowVersions,
+  workflowEditorLayouts,
   workflowRuns,
   workflowApprovalRequests,
   workflowSchedules,

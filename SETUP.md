@@ -129,6 +129,8 @@ The dashboard Workflow schedules panel creates CRON, INTERVAL, and ONE_TIME sche
 
 The dashboard Secure workflow webhooks panel creates workspace-owned triggers for existing workflows. Public requests must include `X-Flowyn-Timestamp` and `X-Flowyn-Signature: v1=<hex>`, where the HMAC-SHA256 message is `<timestamp>.<exact raw body bytes>`. A signed request is durably deduplicated in PostgreSQL before the existing outbox/worker path runs. Event history stores hashes, sizes, status, duplicate counts, and run links only; it does not store raw bodies, headers, signatures, or secrets. Members can read safe history; admins and owners can mutate triggers.
 
+The dashboard Workflows panel also provides a Canvas editor for existing workflows. The canvas and Advanced JSON views edit the same six-step `WorkflowDefinition`; node coordinates and viewport are stored separately in `workflow_editor_layouts`. Save requests include the loaded `currentVersionId`, and a concurrent save returns HTTP 409 `WORKFLOW_VERSION_CONFLICT` without discarding unsaved edits. Agent and brand references are rechecked server-side even when a workflow is disabled.
+
 ## Health checks
 
 ```powershell
@@ -164,6 +166,7 @@ The full local verification script also checks workflow tables, constraints, lea
 It additionally checks schedule tables, occurrence uniqueness, scheduler heartbeat, bounded one-time execution, and schedule-to-worker delivery.
 It also checks webhook tables, encrypted-secret projections, protocol bounds, public route deduplication, and the existing workflow outbox path without exposing credentials or raw delivery bodies.
 It also checks approval tables, role/status/expiry constraints, safe projections, manual/scheduled/webhook pause and resume, rejection, expiration, cancellation, role enforcement, decision races, idempotency, and continuation generation without rerunning completed steps.
+It also checks the visual-editor layout table/indexes, definition projection, version-scoped layout persistence, and concurrent first-writer-wins saves in `tests/workflow-editor.integration.test.ts`.
 
 ## Troubleshooting
 

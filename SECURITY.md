@@ -26,6 +26,14 @@
 - Model observations are bounded, escaped, and delimited as untrusted prompt data. Persisted step rows contain only safe summaries; hidden reasoning and raw tool output are not requested or stored.
 - Agent execution has hard step, model-call, tool-call, total-time, observation, goal, and final-response bounds. Request aborts use `AbortSignal`; durable cross-request cancellation is intentionally deferred.
 
+## Visual workflow editor security
+
+- The editor is a projection of the existing `WorkflowDefinition`; `@xyflow/react` never executes client graph data. The server re-parses the complete definition, checks the static six-step registry, graph reachability/cycle/reference rules, and referenced agent/brand ownership on every executable save, including disabled workflows.
+- GET and PATCH use the existing Better Auth session and centralized workspace authorization. A client-supplied workflow ID or layout workspace/version ID is never sufficient for access; workflow and layout reads include the authorized workflow workspace predicate.
+- `workflow_editor_layouts` contains only bounded coordinates and viewport values. It excludes executable config, prompts, credentials, raw inputs, tool output, and secrets; it does not affect definition hashes, snapshots, scheduler/webhook/approval state, or execution.
+- Definition and layout saves use the PostgreSQL-authoritative `currentVersionId` token and a row lock. A stale token returns `WORKFLOW_VERSION_CONFLICT` (409), so concurrent editors cannot silently overwrite a newer executable version. Failed or conflicting saves retain unsaved client state.
+- Advanced JSON and Canvas use the same server PATCH path. The UI performs no dynamic imports, `eval`, `Function`, shell, SQL, filesystem, arbitrary HTTP, browser automation, or user-selected executable module loading. Node labels/configuration are rendered as text or bounded JSON.
+
 Workflow definitions, request bodies, inputs, references, step configs, and idempotency keys are strict and bounded. Reference paths reject __proto__, prototype, and constructor. Workflow access is workspace-scoped: members may cancel only runs they started, while admins and owners may cancel any cancellable run in their workspace, including scheduled runs whose startedBy is NULL.
 
 Workflow versions and run snapshots are immutable. External agent and brand IDs are re-resolved at execution and must still belong to the workspace; disabled or deleted agents cannot run. Workflow execution uses a static server registry and cannot invoke eval, Function, dynamic modules, shell, arbitrary SQL, filesystem access, arbitrary HTTP, browser automation, or user-selected tools.
@@ -72,7 +80,7 @@ A resource ID is not an authorization decision. A protected service must:
 
 ## Deferred controls
 
-SSRF protection, encrypted integration credentials, CSRF policy review, file validation, safe expression evaluation, outbound integrations, uploads, and external approval channels remain deferred. They must be implemented before HTTP tools, uploads, or external integrations are enabled.
+SSRF protection, encrypted integration credentials, CSRF policy review, file validation, safe expression evaluation, outbound integrations, uploads, and external approval channels remain deferred. They must be implemented before HTTP tools, uploads, or external integrations are enabled. Milestone 11 has not started.
 
 ## Local AI boundary
 

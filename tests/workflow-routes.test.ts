@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   createWorkflow: vi.fn(),
   listWorkflows: vi.fn(),
   getWorkflow: vi.fn(),
+  getWorkflowEditorProjection: vi.fn(),
   updateWorkflow: vi.fn(),
   deleteWorkflow: vi.fn(),
   createWorkflowRun: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock("@/lib/workflows/service", () => ({
   createWorkflow: mocks.createWorkflow,
   listWorkflows: mocks.listWorkflows,
   getWorkflow: mocks.getWorkflow,
+  getWorkflowEditorProjection: mocks.getWorkflowEditorProjection,
   updateWorkflow: mocks.updateWorkflow,
   deleteWorkflow: mocks.deleteWorkflow,
   createWorkflowRun: mocks.createWorkflowRun,
@@ -50,6 +52,7 @@ describe("workflow routes", () => {
     mocks.createWorkflow.mockResolvedValue(workflow);
     mocks.listWorkflows.mockResolvedValue([workflow]);
     mocks.getWorkflow.mockResolvedValue(workflow);
+    mocks.getWorkflowEditorProjection.mockResolvedValue({ workflow, definition, currentVersionId: "44444444-4444-4444-8444-444444444444", currentVersion: 1, layout: { nodes: [{ id: "start", x: 0, y: 0 }], viewport: { x: 0, y: 0, zoom: 1 } } });
     mocks.updateWorkflow.mockResolvedValue({ ...workflow, currentVersion: 2 });
     mocks.deleteWorkflow.mockResolvedValue(undefined);
     mocks.createWorkflowRun.mockResolvedValue({ id: runId, status: "QUEUED", workflowId });
@@ -72,7 +75,10 @@ describe("workflow routes", () => {
     const patch = await patchRoute(request("http://localhost/api/workflows/id", "PATCH", { definition }), context);
     expect(patch.status).toBe(200);
     expect(mocks.updateWorkflow).toHaveBeenCalledWith("user-1", workflowId, { definition });
-    expect((await getRoute(new Request("http://localhost/api/workflows/id"), context)).status).toBe(200);
+    const getResponse = await getRoute(new Request("http://localhost/api/workflows/id"), context);
+    expect(getResponse.status).toBe(200);
+    expect(mocks.getWorkflowEditorProjection).toHaveBeenCalledWith("user-1", workflowId);
+    expect(await getResponse.json()).toMatchObject({ workflow, definition, currentVersionId: "44444444-4444-4444-8444-444444444444" });
     expect((await deleteRoute(new Request("http://localhost/api/workflows/id", { method: "DELETE" }), context)).status).toBe(204);
   });
 

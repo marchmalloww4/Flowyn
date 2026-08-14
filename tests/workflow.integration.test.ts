@@ -54,7 +54,7 @@ describeIntegration("workflow PostgreSQL/Redis/BullMQ integration", () => {
     const first = await createWorkflowRun(userId, workflow.id, { source: "first" }, "integration-key", db);
     const repeated = await createWorkflowRun(userId, workflow.id, { source: "ignored-on-replay" }, "integration-key", db);
     expect(repeated.id).toBe(first.id);
-    await updateWorkflow(userId, workflow.id, { definition: definitionV2 }, db);
+    await updateWorkflow(userId, workflow.id, { definition: definitionV2, expectedVersionId: workflow.currentVersionId! }, db);
     const second = await createWorkflowRun(userId, workflow.id, { source: "second" }, undefined, db);
     expect(first.workflowVersion).toBe(1);
     expect(second.workflowVersion).toBe(2);

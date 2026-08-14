@@ -5,7 +5,7 @@ import { aiGenerateExecutor } from "@/lib/workflows/executors/ai-generate";
 import { setValueExecutor } from "@/lib/workflows/executors/set-value";
 import { transformExecutor } from "@/lib/workflows/executors/transform";
 import { approvalExecutor } from "@/lib/workflows/executors/approval";
-import type { WorkflowStep, WorkflowStepExecutor, WorkflowStepType } from "@/lib/workflows/types";
+import { WORKFLOW_STEP_TYPES, type WorkflowStep, type WorkflowStepExecutor, type WorkflowStepType } from "@/lib/workflows/types";
 
 export class WorkflowStepRegistry {
   private readonly executors = new Map<WorkflowStepType, WorkflowStepExecutor<unknown>>();
@@ -34,7 +34,7 @@ export function createDefaultWorkflowStepRegistry(): WorkflowStepRegistry {
 }
 
 export function isWorkflowStepType(value: string): value is WorkflowStepType {
-  return ["SET_VALUE", "TRANSFORM", "CONDITION", "AI_GENERATE", "AGENT", "APPROVAL"].includes(value);
+  return (WORKFLOW_STEP_TYPES as readonly string[]).includes(value);
 }
 
 export function stepTypeOf(step: WorkflowStep): WorkflowStepType {

@@ -1,6 +1,6 @@
 # Architecture
 
-## Milestone 7 boundary
+## Milestone 10 boundary
 
 Flowyn is intentionally a modular monolith. Milestones 1 through 4 establish the runtime, authentication, tenant boundary, role-aware membership management, brand foundation, audit trail, provider-agnostic local AI, verified local embeddings, pgvector knowledge, and bounded RAG—not the eventual automation engine.
 
@@ -110,6 +110,7 @@ Milestones 6 and 7 include Better Auth tables plus:
 - `knowledge_chunks` for deterministic chunks and validated `vector(768)` embeddings from the live `nomic-embed-text` model.
 - `agents` for workspace-owned, optionally brand-bound definitions with `allowedTools`, `enabled`, `maxSteps`, and `deletedAt`.
 - `agent_runs` and `agent_run_steps` for synchronous terminal status, bounded final responses, and safe step metadata. Run history survives agent soft deletion.
+- `workflow_editor_layouts` for one workspace-scoped, version-associated current canvas layout per workflow. It stores only bounded coordinates and viewport metadata.
 
 Structured future Brand DNA fields are stored in JSONB where the shape is expected to evolve. Normalized rules and examples remain separate so later ingestion and analysis can attach provenance.
 
@@ -153,6 +154,8 @@ Schedule routes are GET/POST /api/workflow-schedules, GET/PATCH/DELETE /api/work
 
 Webhook routes are GET/POST /api/workflow-webhooks, GET/PATCH/DELETE /api/workflow-webhooks/:id, POST /api/workflow-webhooks/:id/enable, POST /api/workflow-webhooks/:id/disable, POST /api/workflow-webhooks/:id/rotate-secret, and GET /api/workflow-webhooks/:id/events. Members can read safe trigger/history projections; admins and owners can mutate. Public POST /api/hooks/:publicId is authenticated by the trigger secret and is restricted to the trigger's configured workflow.
 
+Workflow routes include GET/POST `/api/workflows`, GET/PATCH/DELETE `/api/workflows/:id`, and POST `/api/workflows/:id/runs`. The resource GET is the authorized editor projection; the resource PATCH is the authoritative save path. Members with the existing `workflow.write` action can edit, while server validation remains authoritative for executable definitions and referenced resources.
+
 Knowledge routes are protected by the same session and workspace boundary: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/:id`, `POST /api/knowledge/:id/reindex`, and `POST /api/knowledge/retrieve`. Client workspace and brand IDs are validated but never trusted without server-side brand ownership and membership checks. Embeddings are never returned to clients.
 
 Agent routes use the same session and workspace boundary: `GET/POST /api/agents`, `GET/PATCH/DELETE /api/agents/:id`, `POST /api/agents/:id/runs`, and `GET /api/agent-runs/:id`. Definitions are soft-deleted with `deletedAt`; disabled definitions remain manageable but reject new runs. The run endpoint is synchronous, accepts only a bounded goal, derives all workspace/user/brand/tool/policy context on the server, and returns a terminal result. History exposes only bounded final output and safe step metadata.
@@ -172,6 +175,18 @@ The existing outbox row remains one row per run. Initial dispatch uses generatio
 Approval APIs use Better Auth, centralized workspace actions, and current membership roles. Members can read safe projections. Only an authenticated current ADMIN or OWNER satisfying the stored policy can decide; self-approval is allowed. Automation principals can reach the step but have no decision route or decision authority. The scheduler performs bounded expiration maintenance and lazy decision paths provide correctness when the scheduler is delayed.
 
 Milestone 9 introduces no outbound HTTP, OAuth, third-party credentials, public approval links, browser automation, file uploads, arbitrary execution, or new queue/service boundary.
+
+## Server-validated visual workflow editor
+
+Milestone 10 adds an authoring projection over the existing workflow engine. `WorkflowDefinition` remains the only executable representation; the existing static registry, Zod schema, graph validator, resource checks, immutable versions, outbox, scheduler, webhook, approval, and worker paths remain authoritative.
+
+The existing workflow GET returns metadata, the current definition, `currentVersionId`, the version number, and a compatible layout. Definition or layout PATCHes include `expectedVersionId`; the service locks the workflow row in PostgreSQL and returns `WORKFLOW_VERSION_CONFLICT` with HTTP 409 when another writer has advanced the token. Metadata-only updates remain compatible without a version token.
+
+The browser uses `@xyflow/react` only as a presentation/editor surface. It supports the six registered step types, drag positions, viewport state, configuration editing, and an Advanced JSON view. Canvas and raw JSON both serialize to the same `WorkflowDefinition` and pass the same server-side validation. No client-supplied node type, edge, agent, brand, workspace, role, or executable capability is trusted.
+
+`workflow_editor_layouts` stores only bounded node coordinates and viewport metadata, scoped to a workflow and the version it was viewed with. Layout never contributes to definition hashes, immutable version JSON, workflow snapshots, scheduling, webhook delivery, approval state, or execution. Missing, malformed, mismatched, or incomplete layouts fall back to a deterministic default.
+
+Milestone 10 introduces no outbound HTTP, OAuth, credentials, file uploads, browser automation, dynamic modules, arbitrary expressions, second queue, or second runtime. Milestone 11 has not started.
 
 ## Extension points
 

@@ -112,6 +112,12 @@ The static `APPROVAL` workflow step is a human control boundary, not an AI capab
 
 Approval context contains only safe operational projections. Raw prompts, model responses beyond existing bounded workflow output, RAG text, hidden reasoning, tool observations, webhook bodies, credentials, and secrets are not copied into the inbox. Approval resumes the existing immutable workflow snapshot through the same outbox/worker path; it does not re-run completed AI or agent steps. LLMProvider, BrandContext/RAG, static AgentRunner, and workspace automation principals remain unchanged and cannot bypass the human decision boundary.
 
-## Milestone 7 limitations
+## Milestone 10 visual workflow editor
 
-There is no external file import, agent memory, critic, multi-agent orchestration, visual workflow canvas, outbound integration, OAuth, or billing in this milestone. Webhooks remain limited to the inbound HMAC protocol, and M9 approvals remain internal authenticated workspace decisions; outbound external actions and external approval channels remain deferred.
+The visual editor does not add an AI runtime or a second workflow representation. AI_GENERATE and AGENT nodes remain bounded registered configurations and execute through `LLMProvider`, workspace/brand-isolated BrandContext/RAG, and the controlled `AgentRunner`. Server-side definition saves recheck all referenced resources, including for disabled workflows.
+
+Canvas state is an authoring projection. It serializes to the same `WorkflowDefinition` used by Advanced JSON and the existing static workflow registry. Node positions and viewport metadata are stored separately and are never passed to an LLM, agent prompt, tool registry, workflow snapshot, or execution context. The editor has no arbitrary HTTP, tool, code, shell, SQL, filesystem, browser, or dynamic module capability.
+
+## Milestone 10 limitations
+
+There is no external file import, agent memory, critic, multi-agent orchestration, outbound integration, OAuth, or billing in this milestone. Webhooks remain limited to the inbound HMAC protocol, and M9 approvals remain internal authenticated workspace decisions; outbound external actions and external approval channels remain deferred. Milestone 11 has not started.

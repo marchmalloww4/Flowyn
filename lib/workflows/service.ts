@@ -5,11 +5,13 @@ import { getAgent, getAgentForWorkspace } from "@/lib/agents/service";
 import { getBrand, getBrandForWorkspace } from "@/lib/brands/service";
 import { requireWorkspaceAction, requireWorkspaceMember } from "@/lib/authz/authorization";
 import { recordAuditEvent } from "@/lib/audit/service";
-import { getDatabase, type Database, workflowApprovalRequests, workflowRunDispatches, workflowRuns, workflowScheduleOccurrences, workflowStepRuns, workflowVersions, workflowWebhookEvents, workflowWebhookTriggers, workflows } from "@/lib/database";
+import { getDatabase, type Database, workflowApprovalRequests, workflowEditorLayouts, workflowRunDispatches, workflowRuns, workflowScheduleOccurrences, workflowStepRuns, workflowVersions, workflowWebhookEvents, workflowWebhookTriggers, workflows } from "@/lib/database";
 import { AppError } from "@/lib/security/errors";
 import { userExecutionPrincipal, webhookAutomationPrincipal, workspaceAutomationPrincipal, type ExecutionPrincipal, type WorkspaceAutomationPrincipal } from "@/lib/security/principal";
 import { validateWorkflowDefinition } from "@/lib/workflows/validation";
 import { getWorkflowExecutionPolicy } from "@/lib/workflows/policy";
+import { createDefaultWorkflowLayout, type WorkflowEditorLayout } from "@/lib/workflows/editor";
+import { parseWorkflowEditorLayout } from "@/lib/workflows/editor-layout";
 import type { JsonValue, WorkflowDefinition } from "@/lib/workflows/types";
 import { workflowCreateSchema, workflowPatchSchema, workflowRunSchema, type WorkflowCreateInput, type WorkflowPatchInput } from "@/lib/workflows/validation";
 
@@ -97,11 +99,33 @@ async function loadVersion(workflow: WorkflowDefinitionRecord, db: Database): Pr
   return version;
 }
 
+async function loadCurrentVersion(workflow: WorkflowDefinitionRecord, db: Database): Promise<WorkflowVersion> {
+  const condition = workflow.currentVersionId
+    ? and(eq(workflowVersions.id, workflow.currentVersionId), eq(workflowVersions.workflowId, workflow.id), eq(workflowVersions.workspaceId, workflow.workspaceId))
+    : and(eq(workflowVersions.workflowId, workflow.id), eq(workflowVersions.workspaceId, workflow.workspaceId), eq(workflowVersions.version, workflow.currentVersion));
+  const [version] = await db.select().from(workflowVersions).where(condition).limit(1);
+  if (!version) throw new AppError("WORKFLOW_INVALID_DEFINITION", 500, "The workflow current version is missing.");
+  return version;
+}
+
+function isCompatibleWorkflowLayout(layout: WorkflowEditorLayout, definition: WorkflowDefinition): boolean {
+  const stepIds = new Set(definition.steps.map((step) => step.id));
+  return layout.nodes.length === stepIds.size && layout.nodes.every((node) => stepIds.has(node.id));
+}
+
+export interface WorkflowEditorProjection {
+  workflow: WorkflowDefinitionRecord;
+  definition: WorkflowDefinition;
+  currentVersionId: string;
+  currentVersion: number;
+  layout: WorkflowEditorLayout;
+}
+
 export async function createWorkflow(userId: string, input: WorkflowCreateInput, db: Database = getDatabase()): Promise<WorkflowDefinitionRecord> {
   const parsed = workflowCreateSchema.parse(input);
   const definition = validateWorkflowDefinition(parsed.definition);
   await requireWorkspaceAction(userId, parsed.workspaceId, "workflow.write", db);
-  if (parsed.enabled) await validateReferencedResources(userId, parsed.workspaceId, definition, db, false);
+  await validateReferencedResources(userId, parsed.workspaceId, definition, db, parsed.enabled);
   const hash = hashDefinition(definition);
   return db.transaction(async (tx) => {
     const [created] = await tx.insert(workflows).values({ workspaceId: parsed.workspaceId, name: parsed.name, description: parsed.description, enabled: parsed.enabled, currentVersion: 1, createdBy: userId }).returning();
@@ -124,18 +148,47 @@ export async function getWorkflow(userId: string, workflowId: string, db: Databa
   return loadWorkflow(userId, workflowId, db);
 }
 
+export async function getWorkflowEditorProjection(userId: string, workflowId: string, db: Database = getDatabase()): Promise<WorkflowEditorProjection> {
+  const workflow = await loadWorkflow(userId, workflowId, db);
+  const version = await loadCurrentVersion(workflow, db);
+  const definition = validateWorkflowDefinition(version.definition);
+  const [storedLayout] = await db.select().from(workflowEditorLayouts).where(and(eq(workflowEditorLayouts.workflowId, workflow.id), eq(workflowEditorLayouts.workspaceId, workflow.workspaceId))).limit(1);
+  let layout = createDefaultWorkflowLayout(definition);
+  if (storedLayout && storedLayout.workflowVersionId === version.id) {
+    const parsedLayout = parseWorkflowEditorLayout(storedLayout.layout);
+    if (isCompatibleWorkflowLayout(parsedLayout, definition)) layout = parsedLayout;
+  }
+  return { workflow, definition, currentVersionId: version.id, currentVersion: version.version, layout };
+}
+
 export async function updateWorkflow(userId: string, workflowId: string, input: WorkflowPatchInput, db: Database = getDatabase()): Promise<WorkflowDefinitionRecord> {
   const existing = await loadWorkflow(userId, workflowId, db);
   const parsed = workflowPatchSchema.parse(input);
   const definition = parsed.definition ? validateWorkflowDefinition(parsed.definition) : undefined;
+  const layout = parsed.layout ? parseWorkflowEditorLayout(parsed.layout) : undefined;
+  const requiresVersionMatch = definition !== undefined || layout !== undefined;
+  if (requiresVersionMatch && !parsed.expectedVersionId) throw new AppError("WORKFLOW_VERSION_REQUIRED", 409, "The current workflow version is required for this save.");
   await requireWorkspaceAction(userId, existing.workspaceId, "workflow.write", db);
-  if (parsed.enabled && definition) await validateReferencedResources(userId, existing.workspaceId, definition, db, false);
+  if (definition) await validateReferencedResources(userId, existing.workspaceId, definition, db, parsed.enabled === true);
+  if (layout) {
+    const layoutDefinition = definition ?? validateWorkflowDefinition((await loadCurrentVersion(existing, db)).definition);
+    if (!isCompatibleWorkflowLayout(layout, layoutDefinition)) throw new AppError("WORKFLOW_LAYOUT_INVALID", 400, "The editor layout must contain exactly one position for every workflow step.");
+  }
+  if (parsed.enabled === true && !definition) {
+    const current = await loadCurrentVersion(existing, db);
+    await validateReferencedResources(userId, existing.workspaceId, validateWorkflowDefinition(current.definition), db, true);
+  }
   return db.transaction(async (tx) => {
-    let currentVersionId = existing.currentVersionId;
-    let currentVersion = existing.currentVersion;
+    const [locked] = await tx.select().from(workflows).where(and(eq(workflows.id, existing.id), eq(workflows.workspaceId, existing.workspaceId), isNull(workflows.deletedAt))).for("update").limit(1);
+    if (!locked) throw resourceNotFound();
+    if (requiresVersionMatch && locked.currentVersionId !== parsed.expectedVersionId) {
+      throw new AppError("WORKFLOW_VERSION_CONFLICT", 409, "The workflow changed since it was loaded. Reload before saving.");
+    }
+    let currentVersionId = locked.currentVersionId;
+    let currentVersion = locked.currentVersion;
     if (definition) {
       currentVersion += 1;
-      const [version] = await tx.insert(workflowVersions).values({ workflowId: existing.id, workspaceId: existing.workspaceId, version: currentVersion, definition, definitionHash: hashDefinition(definition), createdBy: userId }).returning();
+      const [version] = await tx.insert(workflowVersions).values({ workflowId: locked.id, workspaceId: locked.workspaceId, version: currentVersion, definition, definitionHash: hashDefinition(definition), createdBy: userId }).returning();
       if (!version) throw new AppError("WORKFLOW_VERSION_CREATE_FAILED", 500, "Workflow version could not be created.");
       currentVersionId = version.id;
     }
@@ -145,8 +198,12 @@ export async function updateWorkflow(userId: string, workflowId: string, input: 
       ...(parsed.enabled === undefined ? {} : { enabled: parsed.enabled }),
       ...(definition ? { currentVersion, currentVersionId } : {}),
       updatedAt: new Date(),
-    }).where(and(eq(workflows.id, existing.id), isNull(workflows.deletedAt))).returning();
+    }).where(and(eq(workflows.id, locked.id), isNull(workflows.deletedAt))).returning();
     if (!updated) throw new AppError("WORKFLOW_UPDATE_FAILED", 500, "Workflow could not be updated.");
+    if (layout) {
+      if (!currentVersionId) throw new AppError("WORKFLOW_INVALID_DEFINITION", 500, "The workflow current version is missing.");
+      await tx.insert(workflowEditorLayouts).values({ workflowId: locked.id, workspaceId: locked.workspaceId, workflowVersionId: currentVersionId, layout, updatedBy: userId }).onConflictDoUpdate({ target: workflowEditorLayouts.workflowId, set: { workflowVersionId: currentVersionId, layout, updatedBy: userId, updatedAt: new Date() } });
+    }
     await recordAuditEvent({ workspaceId: updated.workspaceId, actorUserId: userId, action: "workflow.updated", resourceType: "workflow", resourceId: updated.id, metadata: { fields: Object.keys(parsed), version: updated.currentVersion } }, tx);
     if (parsed.enabled !== undefined) await recordAuditEvent({ workspaceId: updated.workspaceId, actorUserId: userId, action: parsed.enabled ? "workflow.enabled" : "workflow.disabled", resourceType: "workflow", resourceId: updated.id, metadata: { enabled: parsed.enabled } }, tx);
     return updated;

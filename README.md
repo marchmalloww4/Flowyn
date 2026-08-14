@@ -2,7 +2,7 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1 through 9**:
+This repository currently contains **Milestones 1 through 10**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -19,9 +19,10 @@ This repository currently contains **Milestones 1 through 9**:
 - Durable CRON, interval, and one-time workflow schedules with PostgreSQL occurrence uniqueness, bounded misfire handling, a dedicated scheduler process, Redis heartbeat health, and workspace-scoped schedule history.
 - Secure inbound workflow webhooks with encrypted rotatable secrets, HMAC/timestamp verification, Redis admission limits, PostgreSQL delivery deduplication, durable event/run/outbox transactions, safe delivery history, and a workspace-isolated management panel.
 - Durable human approval gates with a static APPROVAL workflow step, PostgreSQL-owned waiting/decision/expiration/cancellation state, protected workspace approval inbox APIs, safe bounded approval context, and generation-aware workflow continuation dispatch.
+- A server-validated visual workflow editor that projects the existing six-step workflow definition into a React Flow canvas, persists layout separately, supports Advanced JSON round-tripping, and rejects stale saves with optimistic `currentVersionId` concurrency.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, Ollama behavior, agent policy, runner boundaries, protected APIs, and safe persistence.
 
-Outbound integrations, OAuth, billing, visual canvas editing, browser automation, file uploads, and general DAG or loop orchestration remain outside Milestone 9 and are intentionally deferred.
+Outbound integrations, OAuth, billing, browser automation, file uploads, and general DAG or loop orchestration remain outside Milestone 10 and are intentionally deferred. Milestone 11 has not started.
 
 ## Quick start
 
@@ -56,6 +57,8 @@ Schedule APIs are available at `/api/workflow-schedules`, `/api/workflow-schedul
 Webhook management APIs are available at `/api/workflow-webhooks` and its resource, enable/disable, secret-rotation, and event-history routes. Public delivery uses `POST /api/hooks/:publicId` with the documented HMAC headers. Management mutation requires workspace ADMIN or OWNER access; members can read safe configuration and history. The public route never accepts workspace, user, workflow, role, principal, tool, model, endpoint, or execution choices from the sender.
 
 Approval APIs are available at `/api/workflow-approvals`, `/api/workflow-approvals/:id`, `/api/workflow-approvals/:id/approve`, and `/api/workflow-approvals/:id/reject`. Members can read safe approval projections; only currently authorized ADMIN or OWNER users can decide according to the immutable step policy. Automation principals, AI, agents, webhook callers, and workflow input cannot decide approvals.
+
+Workflow editing uses the existing `/api/workflows/:id` GET/PATCH routes. GET returns the current executable definition, version token, and compatible metadata-only layout. Definition or layout saves include `expectedVersionId`; a stale token returns `WORKFLOW_VERSION_CONFLICT` with HTTP 409. The dashboard Canvas view supports the six registered steps, while Advanced JSON uses the same definition serializer and server validation path.
 
 ## Verification
 
@@ -107,7 +110,7 @@ lib/knowledge/       Chunking, indexing, retrieval, and BrandContext services
 lib/agents/          Bounded runner, trusted tool registry, agent service, and safe run persistence
 lib/schedules/       Schedule validation/calculation, occurrence processing, scheduler runtime, and heartbeat
 lib/webhooks/        HMAC protocol, encrypted secrets, bounded ingress, deduplication, rate limiting, management, and safe history
-lib/workflows/       Immutable workflow definitions, static executors, durable runs/outbox, schedules, webhooks, and human approval gates
+lib/workflows/       Immutable workflow definitions, static executors, durable runs/outbox, schedules, webhooks, human approval gates, and editor projection/concurrency
 db/migrations/       Generated PostgreSQL migrations
 tests/               Vitest tests
 scripts/             Local verification helpers
