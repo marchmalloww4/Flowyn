@@ -97,6 +97,7 @@ export interface WorkflowStepExecutionContext {
   abortSignal: AbortSignal;
   db: Database;
   provider?: LLMProvider;
+  correlationId?: string | null;
 }
 
 export interface WorkflowStepResult {

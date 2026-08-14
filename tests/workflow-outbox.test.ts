@@ -41,7 +41,7 @@ describe("workflow outbox", () => {
       updateRows: [[{ id: dispatchId, runId, status: "CLAIMED", attempts: 1 }], [{ id: dispatchId, runId, status: "DISPATCHED", attempts: 1 }]],
     });
 
-    await expect(dispatchPendingWorkflowRuns({ db: db as never, dispatcherId: "dispatcher-a" })).resolves.toEqual({ dispatched: 1, failed: 0 });
+    await expect(dispatchPendingWorkflowRuns({ db: db as never, dispatcherId: "dispatcher-a", reserve: async () => ({ acquired: true }) })).resolves.toEqual({ dispatched: 1, failed: 0 });
     expect(enqueueWorkflowRun).toHaveBeenCalledWith(runId);
     expect(db.update).toHaveBeenCalledTimes(2);
   });
@@ -63,7 +63,7 @@ describe("workflow outbox", () => {
       updateRows: [[{ id: dispatchId, runId, status: "CLAIMED", attempts: 1 }], [{ id: dispatchId, runId, status: "FAILED", attempts: 1 }]],
     });
 
-    await expect(dispatchPendingWorkflowRuns({ db: db as never, dispatcherId: "dispatcher-a" })).resolves.toEqual({ dispatched: 0, failed: 1 });
+    await expect(dispatchPendingWorkflowRuns({ db: db as never, dispatcherId: "dispatcher-a", reserve: async () => ({ acquired: true }) })).resolves.toEqual({ dispatched: 0, failed: 1 });
     expect(enqueueWorkflowRun).toHaveBeenCalledWith(runId);
   });
 
@@ -73,7 +73,7 @@ describe("workflow outbox", () => {
       updateRows: [[{ id: dispatchId, runId, status: "CLAIMED", attempts: 1, dispatchGeneration: 2 }], [{ id: dispatchId, runId, status: "DISPATCHED", attempts: 1, dispatchGeneration: 2 }]],
     });
 
-    await expect(dispatchPendingWorkflowRuns({ db: db as never, dispatcherId: "dispatcher-a" })).resolves.toEqual({ dispatched: 1, failed: 0 });
+    await expect(dispatchPendingWorkflowRuns({ db: db as never, dispatcherId: "dispatcher-a", reserve: async () => ({ acquired: true }) })).resolves.toEqual({ dispatched: 1, failed: 0 });
     expect(enqueueWorkflowRun).toHaveBeenCalledWith(runId, 2);
   });
 });

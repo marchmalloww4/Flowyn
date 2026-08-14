@@ -49,7 +49,7 @@ describe("workflow AI and Agent executors", () => {
   it("persists the subordinate AgentRun ID without duplicating AgentRun data", async () => {
     const result = await agentExecutor.execute(baseContext, { agentId: "11111111-1111-4111-8111-111111111111", goal: { kind: "literal", value: "answer" } });
     expect(result).toMatchObject({ output: "agent result", agentRunId: "agent-run-1", safeMetadata: { operation: "AGENT", agentRunId: "agent-run-1" } });
-    expect(mocks.runAgent).toHaveBeenCalledWith(expect.objectContaining({ agentId: "11111111-1111-4111-8111-111111111111", abortSignal: baseContext.abortSignal, db: baseContext.db }));
+    expect(mocks.runAgent).toHaveBeenCalledWith(expect.objectContaining({ agentId: "11111111-1111-4111-8111-111111111111", abortSignal: baseContext.abortSignal, db: baseContext.db, usage: expect.objectContaining({ operationKey: "agent-start:run-1.workflow-step", sourceType: "AGENT_RUN" }) }));
   });
 
   it("passes a workspace automation principal to scheduled AI and Agent steps without a user ID", async () => {

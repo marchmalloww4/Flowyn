@@ -9,6 +9,8 @@ import type { JsonValue, WorkflowStep } from "@/lib/workflows/types";
 import type { LLMProvider } from "@/lib/ai/types";
 import { userExecutionPrincipal } from "@/lib/security/principal";
 import { pauseWorkflowForApproval } from "@/lib/workflows/approval-service";
+import { transferWorkspaceReservation, releaseWorkspaceReservation } from "@/lib/concurrency/service";
+import { recoverExpiredWorkflowDispatch } from "@/lib/workflows/outbox";
 
 export interface ExecuteWorkflowRunOptions {
   runId: string;
@@ -16,6 +18,7 @@ export interface ExecuteWorkflowRunOptions {
   db?: Database;
   provider?: LLMProvider;
   workerId: string;
+  dispatchHandoff?: { reservationId: string; reservationOwnerId: string; generation: number; correlationId?: string | null };
 }
 
 export interface WorkflowExecutorResult {
@@ -47,9 +50,35 @@ export async function executeWorkflowRun(options: ExecuteWorkflowRunOptions): Pr
   const db = options.db ?? getDatabase();
   const registry = options.registry ?? createDefaultWorkflowStepRegistry();
   const policy = getWorkflowExecutionPolicy();
-  const claimed = await claimWorkflowRun(options.runId, options.workerId, db);
+  let adoptedReservation = false;
+  let adoptedWorkspaceId: string | undefined;
+  const releaseAdoptedReservation = async () => {
+    if (!adoptedReservation || !options.dispatchHandoff) return;
+    adoptedReservation = false;
+    if (!adoptedWorkspaceId) return;
+    await releaseWorkspaceReservation({ reservationId: options.dispatchHandoff.reservationId, workspaceId: adoptedWorkspaceId, ownerId: options.workerId }, db);
+  };
+  if (options.dispatchHandoff) {
+    const handoffRun = await getWorkflowRunRecord(options.runId, db);
+    adoptedWorkspaceId = handoffRun?.workspaceId;
+    const adopted = adoptedWorkspaceId ? await transferWorkspaceReservation({ reservationId: options.dispatchHandoff.reservationId, workspaceId: adoptedWorkspaceId, fromOwnerId: options.dispatchHandoff.reservationOwnerId, toOwnerId: options.workerId, leaseMs: policy.executionLeaseMs }, db) : false;
+    if (!adopted) {
+      await recoverExpiredWorkflowDispatch({ runId: options.runId, generation: options.dispatchHandoff.generation }, db);
+      const current = await getWorkflowRunRecord(options.runId, db);
+      return current ? result(options.runId, current, 0) : { runId: options.runId, status: "QUEUED", stepCount: 0, output: null, errorCode: null };
+    }
+    adoptedReservation = true;
+  }
+  let claimed;
+  try {
+    claimed = await claimWorkflowRun(options.runId, options.workerId, db);
+  } catch (error) {
+    await releaseAdoptedReservation().catch(() => undefined);
+    throw error;
+  }
   if (!claimed) {
     const current = await getWorkflowRunRecord(options.runId, db);
+    await releaseAdoptedReservation().catch(() => undefined);
     if (!current) return { runId: options.runId, status: "FAILED", stepCount: 0, output: null, errorCode: "WORKFLOW_NOT_FOUND" };
     return result(options.runId, current, 0);
   }
@@ -61,6 +90,7 @@ export async function executeWorkflowRun(options: ExecuteWorkflowRunOptions): Pr
     principal = run.startedBy ? userExecutionPrincipal(run.startedBy) : await resolveWorkflowRunPrincipal(run, db);
   } catch {
     const failed = await finishWorkflowRun(run.id, executionToken, "FAILED", null, "WORKFLOW_PRINCIPAL_MISSING", db);
+    await releaseAdoptedReservation().catch(() => undefined);
     return failed ? result(run.id, failed, 0, null, "WORKFLOW_PRINCIPAL_MISSING") : result(run.id, run, 0, null, "WORKFLOW_PRINCIPAL_MISSING");
   }
   const definition = run.definitionSnapshot;
@@ -132,7 +162,7 @@ export async function executeWorkflowRun(options: ExecuteWorkflowRunOptions): Pr
       try {
         const executor = registry.get(step.type);
         const config = executor.configSchema.parse(step.config);
-        const stepResult = await executor.execute({ runId: run.id, workspaceId: run.workspaceId, workflowStepId: step.id, workflowStepRunId: stepRun.id, actorUserId: principal.kind === "user" ? principal.userId : null, principal, workflowId: run.workflowId, workflowVersion: run.workflowVersion, triggerInput: run.input, stepOutputs, abortSignal: rootController.signal, db, provider: options.provider }, config);
+        const stepResult = await executor.execute({ runId: run.id, workspaceId: run.workspaceId, workflowStepId: step.id, workflowStepRunId: stepRun.id, actorUserId: principal.kind === "user" ? principal.userId : null, principal, workflowId: run.workflowId, workflowVersion: run.workflowVersion, triggerInput: run.input, stepOutputs, abortSignal: rootController.signal, db, provider: options.provider, correlationId: options.dispatchHandoff?.correlationId ?? run.correlationId }, config);
         if (rootController.signal.aborted) {
           if (cancellationRequested) throw new Error("WORKFLOW_CANCELLED");
           if (totalTimedOut) throw new Error("WORKFLOW_TIMEOUT");
@@ -203,5 +233,6 @@ export async function executeWorkflowRun(options: ExecuteWorkflowRunOptions): Pr
     clearTimeout(totalTimer);
     clearInterval(heartbeat);
     clearInterval(cancellationWatcher);
+    await releaseAdoptedReservation().catch(() => undefined);
   }
 }

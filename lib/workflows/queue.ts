@@ -5,6 +5,10 @@ export const WORKFLOW_QUEUE_NAME = "flowyn-workflows";
 
 export interface WorkflowJobData {
   runId: string;
+  generation?: number;
+  reservationId?: string;
+  reservationOwnerId?: string;
+  correlationId?: string | null;
 }
 
 export function workflowJobId(runId: string, generation = 0): string {
@@ -23,8 +27,8 @@ export function getWorkflowQueue(): Queue<WorkflowJobData> {
   return queue;
 }
 
-export async function enqueueWorkflowRun(runId: string, generation = 0): Promise<void> {
-  await getWorkflowQueue().add("execute", { runId }, { jobId: bullmqWorkflowJobId(runId, generation), removeOnComplete: 1000, removeOnFail: 5000 });
+export async function enqueueWorkflowRun(runId: string, generation = 0, handoff?: { reservationId: string; reservationOwnerId: string; correlationId?: string | null }): Promise<void> {
+  await getWorkflowQueue().add("execute", { runId, generation, ...(handoff ?? {}), correlationId: handoff?.correlationId ?? null }, { jobId: bullmqWorkflowJobId(runId, generation), removeOnComplete: 1000, removeOnFail: 5000 });
 }
 
 export async function closeWorkflowQueue(): Promise<void> {

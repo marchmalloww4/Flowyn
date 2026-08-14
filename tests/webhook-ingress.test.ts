@@ -8,12 +8,14 @@ const mocks = vi.hoisted(() => ({
   createRun: vi.fn(),
   rateLimit: vi.fn(),
   eventExpiry: vi.fn(),
+  admitAcceptedWebhook: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/webhooks/repository", () => ({ getWebhookTriggerByPublicId: mocks.getTrigger }));
 vi.mock("@/lib/webhooks/service", () => ({ decryptActiveWebhookSecret: mocks.decryptSecret, webhookEventExpiry: mocks.eventExpiry }));
 vi.mock("@/lib/webhooks/rate-limit", () => ({ consumeWebhookRateLimit: mocks.rateLimit }));
 vi.mock("@/lib/workflows/service", () => ({ createWebhookWorkflowRun: mocks.createRun }));
+vi.mock("@/lib/usage/service", () => ({ admitAcceptedWebhook: mocks.admitAcceptedWebhook }));
 
 import { ingestWebhookDelivery } from "@/lib/webhooks/ingress";
 
@@ -69,6 +71,7 @@ describe("public webhook ingress", () => {
       redis: {} as never,
     });
     expect(result).toEqual({ accepted: true, duplicate: false });
+    expect(mocks.admitAcceptedWebhook).toHaveBeenCalledWith(expect.objectContaining({ workspaceId, sourceType: "WEBHOOK_EVENT", sourceId: eventDbId, operationKey: expect.stringContaining(`webhook:${triggerId}`) }));
     expect(mocks.createRun).toHaveBeenCalledWith(expect.objectContaining({ webhookTriggerId: triggerId, webhookEventId: eventDbId, input: { event: "publish" } }), expect.anything());
   });
 
@@ -77,6 +80,7 @@ describe("public webhook ingress", () => {
     const result = await ingestWebhookDelivery({ publicId: trigger.publicId, timestamp: parts.timestamp, signature: parts.signature, eventId: "delivery-1", contentType: "application/json", rawBody: parts.body, now: new Date(1700000000 * 1000), db: database({ duplicate: true }) as never, redis: {} as never });
     expect(result).toEqual({ accepted: true, duplicate: true });
     expect(mocks.createRun).not.toHaveBeenCalled();
+    expect(mocks.admitAcceptedWebhook).not.toHaveBeenCalled();
   });
 
   it("rejects a forged signature before opening a database transaction", async () => {
@@ -91,5 +95,6 @@ describe("public webhook ingress", () => {
     const db = database({ workflowEnabled: false });
     await expect(ingestWebhookDelivery({ publicId: trigger.publicId, timestamp: parts.timestamp, signature: parts.signature, eventId: "delivery-2", contentType: "application/json", rawBody: parts.body, now: new Date(1700000000 * 1000), db: db as never, redis: {} as never })).resolves.toEqual({ accepted: true, duplicate: false });
     expect(mocks.createRun).not.toHaveBeenCalled();
+    expect(mocks.admitAcceptedWebhook).toHaveBeenCalledTimes(1);
   });
 });

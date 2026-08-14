@@ -19,11 +19,12 @@ const storedDocument = { id: documentId, workspaceId, brandId, title: "Product f
 function documentDatabase(row: Record<string, unknown> | null = storedDocument) {
   const updateSet = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([{ ...row, status: "PENDING" }]) }) });
   const deleteWhere = vi.fn().mockResolvedValue([]);
+  const transactionSelect = vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ for: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue(row ? [row] : []) }), limit: vi.fn().mockResolvedValue([{}]) }) }) });
   return {
     select: vi.fn().mockReturnValue({ from: () => ({ where: () => ({ limit: vi.fn().mockResolvedValue(row ? [row] : []) }) }) }),
     update: vi.fn().mockReturnValue({ set: updateSet }),
     delete: vi.fn().mockReturnValue({ where: deleteWhere }),
-    transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback({ delete: vi.fn().mockReturnValue({ where: deleteWhere }), insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue([]) }) })),
+    transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback({ select: transactionSelect, update: vi.fn().mockReturnValue({ set: updateSet }), delete: vi.fn().mockReturnValue({ where: deleteWhere }), insert: vi.fn().mockReturnValue({ values: vi.fn().mockResolvedValue([]) }) })),
     updateSet,
     deleteWhere,
   };
@@ -39,7 +40,11 @@ describe("knowledge document service", () => {
   it("creates a pending document with sanitized metadata", async () => {
     const created = { id: "doc-1", workspaceId, brandId, status: "PENDING" };
     const values = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([created]) });
-    const db = { insert: vi.fn().mockReturnValue({ values }) } as never;
+    const tx = {
+      select: vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ for: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([{ id: workspaceId }]) }), limit: vi.fn().mockResolvedValue([{ documentCount: 0, characterCount: 0 }]) }) }) }),
+      insert: vi.fn().mockReturnValue({ values }),
+    };
+    const db = { transaction: vi.fn(async (callback: (value: typeof tx) => Promise<unknown>) => callback(tx)) } as never;
 
     await expect(createKnowledgeDocument("user-1", {
       workspaceId,

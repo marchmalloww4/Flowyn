@@ -6,6 +6,8 @@ import { getWorkflowExecutionPolicy } from "@/lib/workflows/policy";
 import { expressionSchema } from "@/lib/workflows/validation";
 import type { AgentConfig, WorkflowStepExecutor } from "@/lib/workflows/types";
 import { userExecutionPrincipal } from "@/lib/security/principal";
+import { agentRunOperationKey } from "@/lib/usage/policy";
+import { getCorrelationId } from "@/lib/observability/correlation";
 
 const agentConfigSchema = z.object({ agentId: z.string().uuid(), goal: expressionSchema }).strict();
 
@@ -20,7 +22,8 @@ export const agentExecutor: WorkflowStepExecutor<AgentConfig> = {
     if (!principal) throw new WorkflowStepError("WORKFLOW_PRINCIPAL_MISSING", 500, "The workflow execution principal is missing.", false);
     let agentRunId: string | undefined;
     try {
-      const result = await runAgent({ ...(principal.kind === "user" ? { userId: principal.userId } : {}), principal, agentId: config.agentId, goal, provider: context.provider, db: context.db, abortSignal: context.abortSignal, onRunCreated: async (run) => { agentRunId = run.id; } });
+      const stepIdentity = context.workflowStepId ?? context.workflowStepRunId ?? "workflow-step";
+      const result = await runAgent({ ...(principal.kind === "user" ? { userId: principal.userId } : {}), principal, agentId: config.agentId, goal, provider: context.provider, db: context.db, abortSignal: context.abortSignal, usage: { operationKey: agentRunOperationKey(`${context.runId}.${stepIdentity}`), sourceType: "AGENT_RUN", sourceId: context.workflowStepRunId ?? context.runId, correlationId: context.correlationId ?? getCorrelationId() }, onRunCreated: async (run) => { agentRunId = run.id; } });
       if (result.status === "MAX_STEPS_REACHED" || result.finalResponse === null) throw new WorkflowStepError("AGENT_MAX_STEPS", 409, "The subordinate agent reached its step limit.", false, result.runId);
       if (result.finalResponse.length > getWorkflowExecutionPolicy().maxOutputChars) throw new WorkflowStepError("WORKFLOW_OUTPUT_LIMIT", 400, "AGENT output exceeds the configured limit.", false, result.runId);
       const output = sanitizeWorkflowValue(result.finalResponse);

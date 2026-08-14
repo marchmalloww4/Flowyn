@@ -18,9 +18,10 @@ function database() {
   const insertReturning = vi.fn().mockResolvedValue([row]);
   const insertValues = vi.fn().mockReturnValue({ returning: insertReturning });
   const selectLimit = vi.fn().mockResolvedValue([row]);
-  const selectWhere = vi.fn().mockReturnValue({ limit: selectLimit, orderBy: vi.fn().mockResolvedValue([row]) });
+  const selectWhere = vi.fn().mockReturnValue({ limit: selectLimit, orderBy: vi.fn().mockResolvedValue([row]), for: vi.fn().mockReturnValue({ limit: selectLimit }) });
   const selectFrom = vi.fn().mockReturnValue({ where: selectWhere });
-  return { insert: vi.fn().mockReturnValue({ values: insertValues }), select: vi.fn().mockReturnValue({ from: selectFrom }), insertValues, selectLimit };
+  const insert = vi.fn().mockReturnValue({ values: insertValues });
+  return { insert, select: vi.fn().mockReturnValue({ from: selectFrom }), transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback({ insert, select: vi.fn().mockReturnValue({ from: selectFrom }) })), insertValues, selectLimit };
 }
 
 describe("integration credential lifecycle", () => {

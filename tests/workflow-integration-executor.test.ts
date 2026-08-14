@@ -6,18 +6,24 @@ const mocks = vi.hoisted(() => ({
   resolveActiveIntegrationCredential: vi.fn(),
   decryptIntegrationCredentialSecret: vi.fn(),
   claimIntegrationAction: vi.fn(),
+  getIntegrationAction: vi.fn(),
   completeIntegrationAction: vi.fn(),
   failIntegrationAction: vi.fn(),
   markIntegrationCredentialUsed: vi.fn(),
   getConnectorOperation: vi.fn(),
   recordAuditEvent: vi.fn(),
+  admitIntegrationAction: vi.fn().mockResolvedValue(undefined),
+  acquireWorkspaceReservation: vi.fn().mockResolvedValue({ acquired: true, duplicate: false, reservation: { id: "reservation-1" } }),
+  releaseWorkspaceReservation: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("@/lib/audit/service", () => ({ recordAuditEvent: mocks.recordAuditEvent }));
 vi.mock("@/lib/integrations/credentials", () => ({ resolveActiveIntegrationCredential: mocks.resolveActiveIntegrationCredential, decryptIntegrationCredentialSecret: mocks.decryptIntegrationCredentialSecret }));
-vi.mock("@/lib/integrations/actions", () => ({ actionIdempotencyKey: (runId: string, stepId: string) => `${runId}:${stepId}`, claimIntegrationAction: mocks.claimIntegrationAction, completeIntegrationAction: mocks.completeIntegrationAction, failIntegrationAction: mocks.failIntegrationAction }));
+vi.mock("@/lib/integrations/actions", () => ({ actionIdempotencyKey: (runId: string, stepId: string) => `${runId}:${stepId}`, getIntegrationAction: mocks.getIntegrationAction, claimIntegrationAction: mocks.claimIntegrationAction, completeIntegrationAction: mocks.completeIntegrationAction, failIntegrationAction: mocks.failIntegrationAction }));
 vi.mock("@/lib/integrations/repository", () => ({ markIntegrationCredentialUsed: mocks.markIntegrationCredentialUsed }));
 vi.mock("@/lib/integrations/registry", () => ({ getConnectorOperation: mocks.getConnectorOperation }));
+vi.mock("@/lib/usage/service", () => ({ admitIntegrationAction: mocks.admitIntegrationAction }));
+vi.mock("@/lib/concurrency/service", () => ({ acquireWorkspaceReservation: mocks.acquireWorkspaceReservation, releaseWorkspaceReservation: mocks.releaseWorkspaceReservation }));
 
 const config = { connectorId: "slack" as const, credentialId: "11111111-1111-4111-8111-111111111111", operation: "post_message" as const, input: { channel: { kind: "literal" as const, value: "C123" }, text: { kind: "literal" as const, value: "Hello" } } };
 const context = { runId: "run-1", workspaceId: "workspace-1", workflowStepId: "slack", workflowStepRunId: "step-run-1", actorUserId: null, workflowId: "workflow-1", workflowVersion: 1, triggerInput: {}, stepOutputs: {}, abortSignal: new AbortController().signal, db: {} as never };
@@ -28,6 +34,7 @@ describe("durable integration workflow executor", () => {
     mocks.resolveActiveIntegrationCredential.mockResolvedValue({ id: config.credentialId, workspaceId: "workspace-1", connectorId: "slack", secretVersion: 2, encryptedSecretMaterial: "ciphertext" });
     mocks.decryptIntegrationCredentialSecret.mockReturnValue({ apiToken: "xoxb-secret" });
     mocks.claimIntegrationAction.mockResolvedValue({ disposition: "CLAIMED", action: { id: "action-1", status: "IN_FLIGHT", attempt: 1 } });
+    mocks.getIntegrationAction.mockResolvedValue(undefined);
     mocks.completeIntegrationAction.mockResolvedValue({ id: "action-1", status: "SUCCEEDED", safeOutput: { provider: "slack", channel: "C123", providerMessageId: "ts" } });
     mocks.getConnectorOperation.mockReturnValue({ executor: { execute: vi.fn().mockResolvedValue({ output: { provider: "slack", channel: "C123", providerMessageId: "ts" }, safeMetadata: { provider: "slack" }, providerRequestId: "req" }) } });
   });
@@ -36,6 +43,8 @@ describe("durable integration workflow executor", () => {
     const result = await executeIntegrationAction(context, config);
     expect(result.output).toEqual({ provider: "slack", channel: "C123", providerMessageId: "ts" });
     expect(mocks.claimIntegrationAction).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "workspace-1", workflowRunId: "run-1", workflowStepRunId: "step-run-1", credentialSecretVersion: 2 }), context.db);
+    expect(mocks.admitIntegrationAction).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "workspace-1", sourceType: "INTEGRATION_ACTION", sourceId: "run-1:slack" }));
+    expect(mocks.acquireWorkspaceReservation).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "workspace-1", operationClass: "INTEGRATION", sourceId: "run-1:slack", ownerId: "step-run-1", limit: 2 }), context.db);
     expect(mocks.decryptIntegrationCredentialSecret).toHaveBeenCalledWith(expect.objectContaining({ id: config.credentialId }),);
     expect(JSON.stringify(result)).not.toContain("xoxb-secret");
   });
@@ -45,6 +54,14 @@ describe("durable integration workflow executor", () => {
     await expect(executeIntegrationAction(context, config)).resolves.toMatchObject({ output: { providerMessageId: "old" } });
     expect(mocks.decryptIntegrationCredentialSecret).not.toHaveBeenCalled();
     expect(mocks.getConnectorOperation().executor.execute).not.toHaveBeenCalled();
+  });
+
+  it("does not re-admit a persisted terminal action", async () => {
+    mocks.getIntegrationAction.mockResolvedValue({ id: "action-1", status: "SUCCEEDED", safeOutput: { providerMessageId: "old" }, safeResponseMetadata: {} });
+    await expect(executeIntegrationAction(context, config)).resolves.toMatchObject({ output: { providerMessageId: "old" } });
+    expect(mocks.acquireWorkspaceReservation).not.toHaveBeenCalled();
+    expect(mocks.admitIntegrationAction).not.toHaveBeenCalled();
+    expect(mocks.claimIntegrationAction).not.toHaveBeenCalled();
   });
 
   it("turns an ambiguous provider outcome into a non-retryable workflow error", async () => {
@@ -57,6 +74,14 @@ describe("durable integration workflow executor", () => {
   it("does not execute an active duplicate claim", async () => {
     mocks.claimIntegrationAction.mockResolvedValue({ disposition: "IN_FLIGHT", action: { id: "action-1", status: "IN_FLIGHT" } });
     await expect(executeIntegrationAction(context, config)).rejects.toMatchObject({ code: "INTEGRATION_ACTION_IN_FLIGHT", retryable: false });
+  });
+
+  it("defers before creating an action when integration capacity is full", async () => {
+    mocks.acquireWorkspaceReservation.mockResolvedValueOnce({ acquired: false, duplicate: false });
+    await expect(executeIntegrationAction(context, config)).rejects.toMatchObject({ code: "WORKSPACE_CONCURRENCY_LIMIT", retryable: true });
+    expect(mocks.admitIntegrationAction).not.toHaveBeenCalled();
+    expect(mocks.claimIntegrationAction).not.toHaveBeenCalled();
+    expect(mocks.getConnectorOperation().executor.execute).not.toHaveBeenCalled();
   });
 
   it("persists known provider failures as retryable-safe FAILED actions", async () => {

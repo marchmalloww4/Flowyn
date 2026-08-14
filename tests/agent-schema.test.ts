@@ -16,6 +16,7 @@ describe("Milestone 5 agent schema", () => {
     expect(agentRuns.status).toBeDefined();
     expect(agentRuns.goal).toBeDefined();
     expect(agentRuns.finalResponse).toBeDefined();
+    expect(agentRuns.idempotencyKey).toBeDefined();
     expect(agentRunSteps.safeInputMetadata).toBeDefined();
     expect(agentRunSteps.safeOutputMetadata).toBeDefined();
     expect("reasoning" in agentRunSteps).toBe(false);
@@ -30,7 +31,7 @@ describe("Milestone 5 agent schema", () => {
     expect(runConfig.checks).toHaveLength(1);
     expect(stepConfig.checks).toHaveLength(2);
     expect(agentConfig.indexes.map((index) => index.config.name)).toEqual(expect.arrayContaining(["agents_workspace_idx"]));
-    expect(runConfig.indexes.map((index) => index.config.name)).toEqual(expect.arrayContaining(["agent_runs_workspace_created_idx", "agent_runs_agent_idx", "agent_runs_status_idx"]));
+    expect(runConfig.indexes.map((index) => index.config.name)).toEqual(expect.arrayContaining(["agent_runs_workspace_created_idx", "agent_runs_agent_idx", "agent_runs_status_idx", "agent_runs_workspace_idempotency_idx"]));
     expect(stepConfig.indexes.map((index) => index.config.name)).toEqual(expect.arrayContaining(["agent_run_steps_run_idx", "agent_run_steps_workspace_idx"]));
   });
 

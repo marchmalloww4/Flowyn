@@ -1,11 +1,19 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { getWorkflow } from "@/lib/workflows/service";
 import { requireWorkspaceAction } from "@/lib/authz/authorization";
 import { recordAuditEvent } from "@/lib/audit/service";
-import { getDatabase, type Database, workflowScheduleOccurrences, workflowSchedules } from "@/lib/database";
+import { getDatabase, type Database, workflowScheduleOccurrences, workflowSchedules, workspaces } from "@/lib/database";
 import { AppError } from "@/lib/security/errors";
 import { calculateNextRunAt, type ScheduleCalculationInput } from "@/lib/schedules/calculator";
 import { validateScheduleInput } from "@/lib/schedules/validation";
+import { getWorkspaceUsagePolicy } from "@/lib/usage/policy";
+
+async function lockActiveScheduleUsage(tx: Database, workspaceId: string): Promise<number> {
+  const [workspace] = await tx.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, workspaceId)).for("update").limit(1);
+  if (!workspace) throw new AppError("WORKSPACE_NOT_FOUND", 404, "Workspace not found.");
+  const [usage] = await tx.select({ activeSchedules: sql<number>`count(*)` }).from(workflowSchedules).where(and(eq(workflowSchedules.workspaceId, workspaceId), eq(workflowSchedules.enabled, true), isNull(workflowSchedules.deletedAt))).limit(1);
+  return Number(usage?.activeSchedules ?? 0);
+}
 
 export type WorkflowSchedule = typeof workflowSchedules.$inferSelect;
 export type WorkflowScheduleOccurrence = typeof workflowScheduleOccurrences.$inferSelect;
@@ -97,20 +105,24 @@ export async function createWorkflowSchedule(userId: string, input: CreateWorkfl
   const parsed = validateScheduleInput(input.schedule);
   const now = new Date();
   const nextRunAt = initialNextRunAt(scheduleCalculationInput({ ...parsed, nextRunAt: null }), now);
-  const [created] = await db.insert(workflowSchedules).values({
-    workspaceId: input.workspaceId,
-    workflowId: input.workflowId,
-    type: parsed.type,
-    enabled: true,
-    cronExpression: parsed.cronExpression,
-    intervalSeconds: parsed.intervalSeconds,
-    runAt: parsed.runAt,
-    timezone: parsed.timezone,
-    misfirePolicy: parsed.misfirePolicy,
-    input: parsed.input,
-    nextRunAt,
-    createdBy: userId,
-  }).returning();
+  const [created] = await db.transaction(async (tx) => {
+    const activeSchedules = await lockActiveScheduleUsage(tx, input.workspaceId);
+    if (activeSchedules >= getWorkspaceUsagePolicy(input.workspaceId).limits.activeSchedules) throw new AppError("WORKSPACE_QUOTA_EXCEEDED", 429, "Workspace schedule quota exceeded.");
+    return tx.insert(workflowSchedules).values({
+      workspaceId: input.workspaceId,
+      workflowId: input.workflowId,
+      type: parsed.type,
+      enabled: true,
+      cronExpression: parsed.cronExpression,
+      intervalSeconds: parsed.intervalSeconds,
+      runAt: parsed.runAt,
+      timezone: parsed.timezone,
+      misfirePolicy: parsed.misfirePolicy,
+      input: parsed.input,
+      nextRunAt,
+      createdBy: userId,
+    }).returning();
+  });
   if (!created) throw new AppError("WORKFLOW_SCHEDULE_CREATE_FAILED", 500, "Workflow schedule could not be created.");
   await recordAuditEvent({ workspaceId: created.workspaceId, actorUserId: userId, action: "workflow_schedule.created", resourceType: "workflow_schedule", resourceId: created.id, metadata: { workflowId: created.workflowId, type: created.type, timezone: created.timezone } }, db);
   return created;
@@ -152,7 +164,13 @@ export async function setWorkflowScheduleEnabled(userId: string, scheduleId: str
   if (enabled && !existing.nextRunAt) {
     throw new AppError("WORKFLOW_SCHEDULE_NOT_ARMED", 409, "The schedule has no next run time.");
   }
-  const [updated] = await db.update(workflowSchedules).set({ enabled, updatedAt: new Date() }).where(and(eq(workflowSchedules.id, existing.id), isNull(workflowSchedules.deletedAt))).returning();
+  const [updated] = await db.transaction(async (tx) => {
+    if (enabled) {
+      const activeSchedules = await lockActiveScheduleUsage(tx, existing.workspaceId);
+      if (activeSchedules >= getWorkspaceUsagePolicy(existing.workspaceId).limits.activeSchedules) throw new AppError("WORKSPACE_QUOTA_EXCEEDED", 429, "Workspace schedule quota exceeded.");
+    }
+    return tx.update(workflowSchedules).set({ enabled, updatedAt: new Date() }).where(and(eq(workflowSchedules.id, existing.id), isNull(workflowSchedules.deletedAt))).returning();
+  });
   if (!updated) throw new AppError("WORKFLOW_SCHEDULE_UPDATE_FAILED", 500, "Workflow schedule could not be updated.");
   await recordAuditEvent({ workspaceId: updated.workspaceId, actorUserId: userId, action: enabled ? "workflow_schedule.enabled" : "workflow_schedule.disabled", resourceType: "workflow_schedule", resourceId: updated.id, metadata: { enabled } }, db);
   return updated;

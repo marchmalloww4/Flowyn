@@ -10,6 +10,14 @@ import { requireWorkspaceMember } from "@/lib/authz/authorization";
 import { getBrandContext, getBrandContextForPrincipal } from "@/lib/knowledge/brand-context";
 import { AppError } from "@/lib/security/errors";
 import { userExecutionPrincipal, type ExecutionPrincipal } from "@/lib/security/principal";
+import { admitAiGeneration } from "@/lib/usage/service";
+
+export interface GenerationUsageAdmission {
+  operationKey: string;
+  sourceType: string;
+  sourceId?: string | null;
+  correlationId?: string | null;
+}
 
 export interface GenerationRequest {
   userId?: string;
@@ -22,6 +30,7 @@ export interface GenerationRequest {
   maxTokens?: number;
   useBrandContext?: boolean;
   abortSignal?: AbortSignal;
+  usage?: GenerationUsageAdmission;
 }
 
 export interface PreparedGeneration {
@@ -32,6 +41,7 @@ export interface PreparedGeneration {
   userId: string | null;
   principal: ExecutionPrincipal;
   inputChars: number;
+  usage?: GenerationUsageAdmission;
 }
 
 function resolvePrincipal(input: GenerationRequest): ExecutionPrincipal {
@@ -95,6 +105,7 @@ export async function prepareGeneration(input: GenerationRequest, provider: LLMP
     userId: principalUserId,
     principal,
     inputChars: built.totalChars,
+    usage: input.usage,
   };
 }
 
@@ -114,12 +125,13 @@ async function safeRecordGenerationLog(input: Parameters<typeof recordGeneration
 export async function generateText(prepared: PreparedGeneration, db: Database = getDatabase()): Promise<LLMResult> {
   const startedAt = performance.now();
   try {
+    if (prepared.usage) await admitAiGeneration({ workspaceId: prepared.workspaceId, ...prepared.usage, db });
     const result = await prepared.provider.generate(prepared.providerInput);
-    await safeRecordGenerationLog({ workspaceId: prepared.workspaceId, userId: prepared.userId, provider: prepared.config.provider, model: result.model, status: "SUCCEEDED", durationMs: Math.max(0, Math.round(performance.now() - startedAt)), inputChars: prepared.inputChars, outputChars: result.text.length }, db);
+    await safeRecordGenerationLog({ workspaceId: prepared.workspaceId, userId: prepared.userId, provider: prepared.config.provider, model: result.model, status: "SUCCEEDED", durationMs: Math.max(0, Math.round(performance.now() - startedAt)), inputChars: prepared.inputChars, outputChars: result.text.length, correlationId: prepared.usage?.correlationId }, db);
     return result;
   } catch (error) {
     const normalized = normalizeError(error);
-    await safeRecordGenerationLog({ workspaceId: prepared.workspaceId, userId: prepared.userId, provider: prepared.config.provider, model: prepared.config.model, status: "FAILED", durationMs: Math.max(0, Math.round(performance.now() - startedAt)), inputChars: prepared.inputChars, errorCode: normalized.code }, db);
+    await safeRecordGenerationLog({ workspaceId: prepared.workspaceId, userId: prepared.userId, provider: prepared.config.provider, model: prepared.config.model, status: "FAILED", durationMs: Math.max(0, Math.round(performance.now() - startedAt)), inputChars: prepared.inputChars, errorCode: normalized.code, correlationId: prepared.usage?.correlationId }, db);
     throw normalized;
   }
 }
@@ -129,15 +141,16 @@ export async function* streamText(prepared: PreparedGeneration, db: Database = g
   let outputChars = 0;
   let model = prepared.config.model;
   try {
+    if (prepared.usage) await admitAiGeneration({ workspaceId: prepared.workspaceId, ...prepared.usage, db });
     for await (const chunk of prepared.provider.stream(prepared.providerInput)) {
       model = chunk.model;
       outputChars += chunk.text.length;
       yield chunk;
     }
-    await safeRecordGenerationLog({ workspaceId: prepared.workspaceId, userId: prepared.userId, provider: prepared.config.provider, model, status: "SUCCEEDED", durationMs: Math.max(0, Math.round(performance.now() - startedAt)), inputChars: prepared.inputChars, outputChars }, db);
+    await safeRecordGenerationLog({ workspaceId: prepared.workspaceId, userId: prepared.userId, provider: prepared.config.provider, model, status: "SUCCEEDED", durationMs: Math.max(0, Math.round(performance.now() - startedAt)), inputChars: prepared.inputChars, outputChars, correlationId: prepared.usage?.correlationId }, db);
   } catch (error) {
     const normalized = normalizeError(error);
-    await safeRecordGenerationLog({ workspaceId: prepared.workspaceId, userId: prepared.userId, provider: prepared.config.provider, model, status: "FAILED", durationMs: Math.max(0, Math.round(performance.now() - startedAt)), inputChars: prepared.inputChars, outputChars, errorCode: normalized.code }, db);
+    await safeRecordGenerationLog({ workspaceId: prepared.workspaceId, userId: prepared.userId, provider: prepared.config.provider, model, status: "FAILED", durationMs: Math.max(0, Math.round(performance.now() - startedAt)), inputChars: prepared.inputChars, outputChars, errorCode: normalized.code, correlationId: prepared.usage?.correlationId }, db);
     throw normalized;
   }
 }

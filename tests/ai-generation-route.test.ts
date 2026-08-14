@@ -24,11 +24,11 @@ describe("AI generation route", () => {
     prepareGeneration.mockResolvedValue({ provider: {}, providerInput: {}, config: { provider: "ollama" }, workspaceId, userId: "user-1", inputChars: 10 });
     generateText.mockResolvedValue({ text: "Hello", model: "llama3.2:3b", done: true, durationMs: 12 });
 
-    const response = await POST(new Request("http://localhost/api/ai/generate", { method: "POST", body: JSON.stringify({ workspaceId, prompt: "Say hello" }), headers: { "Content-Type": "application/json" } }));
+    const response = await POST(new Request("http://localhost/api/ai/generate", { method: "POST", body: JSON.stringify({ workspaceId, prompt: "Say hello" }), headers: { "Content-Type": "application/json", "Idempotency-Key": "request-1" } }));
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ result: { text: "Hello", model: "llama3.2:3b" } });
-    expect(prepareGeneration).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1", workspaceId, prompt: "Say hello" }));
+    expect(prepareGeneration).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1", workspaceId, prompt: "Say hello", usage: { operationKey: "direct-ai:request-1", sourceType: "DIRECT_AI", sourceId: "request-1", correlationId: expect.any(String) } }));
   });
 
   it("rejects malformed requests before calling the generation service", async () => {

@@ -6,6 +6,7 @@ import { AppError } from "@/lib/security/errors";
 import { buildWorkflowApprovalSafeContext, canDecideWorkflowApproval, type WorkflowApprovalOrigin } from "@/lib/workflows/approvals";
 import type { WorkflowApprovalRole } from "@/lib/workflows/types";
 import { isWorkspaceRole } from "@/lib/workspaces/roles";
+import { getCorrelationId } from "@/lib/observability/correlation";
 
 export type WorkflowApprovalRequest = typeof workflowApprovalRequests.$inferSelect;
 
@@ -174,7 +175,7 @@ async function resetContinuationDispatch(tx: Database, runId: string, now: Date)
     updatedAt: now,
   }).where(eq(workflowRunDispatches.runId, runId)).returning();
   if (!reset) {
-    await tx.insert(workflowRunDispatches).values({ runId, status: "PENDING", dispatchGeneration: 1, attempts: 0, updatedAt: now }).returning();
+    await tx.insert(workflowRunDispatches).values({ runId, status: "PENDING", dispatchGeneration: 1, attempts: 0, correlationId: getCorrelationId(), updatedAt: now }).returning();
   }
 }
 

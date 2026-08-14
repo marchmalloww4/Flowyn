@@ -9,6 +9,8 @@ export type WorkspaceAction =
   | "workspace.read"
   | "workspace.update"
   | "workspace.delete"
+  | "workspace.usage.read"
+  | "workspace.operations.read"
   | "membership.manage"
   | "membership.role"
   | "brand.read"
@@ -47,7 +49,7 @@ export type WorkspaceAction =
 
 export function canPerformWorkspaceAction(role: WorkspaceRole, action: WorkspaceAction): boolean {
   if (role === "OWNER") return true;
-  if (role === "ADMIN") return ["workspace.read", "workspace.update", "membership.manage", "brand.read", "brand.write", "brand.delete", "agent.read", "agent.run", "agent.write", "agent.delete", "workflow.read", "workflow.run", "workflow.write", "workflow.delete", "workflow.cancel", "workflow_approval.read", "workflow_approval.decide", "workflow_schedule.read", "workflow_schedule.create", "workflow_schedule.update", "workflow_schedule.enable", "workflow_schedule.disable", "workflow_schedule.delete", "workflow_webhook.read", "workflow_webhook.create", "workflow_webhook.update", "workflow_webhook.enable", "workflow_webhook.disable", "workflow_webhook.delete", "workflow_webhook.rotate_secret", "integration.read", "integration.create", "integration.update", "integration.delete", "integration.rotate_secret", "integration.execute"].includes(action);
+  if (role === "ADMIN") return ["workspace.read", "workspace.update", "workspace.usage.read", "workspace.operations.read", "membership.manage", "brand.read", "brand.write", "brand.delete", "agent.read", "agent.run", "agent.write", "agent.delete", "workflow.read", "workflow.run", "workflow.write", "workflow.delete", "workflow.cancel", "workflow_approval.read", "workflow_approval.decide", "workflow_schedule.read", "workflow_schedule.create", "workflow_schedule.update", "workflow_schedule.enable", "workflow_schedule.disable", "workflow_schedule.delete", "workflow_webhook.read", "workflow_webhook.create", "workflow_webhook.update", "workflow_webhook.enable", "workflow_webhook.disable", "workflow_webhook.delete", "workflow_webhook.rotate_secret", "integration.read", "integration.create", "integration.update", "integration.delete", "integration.rotate_secret", "integration.execute"].includes(action);
   return ["workspace.read", "brand.read", "agent.read", "agent.run", "workflow.read", "workflow.run", "workflow.cancel", "workflow_approval.read", "workflow_schedule.read", "workflow_webhook.read", "integration.read"].includes(action);
 }
 

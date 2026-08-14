@@ -79,6 +79,20 @@ export function getEnv(): AppEnv {
   return cachedEnv;
 }
 
+export function getProductionConfigurationIssues(env: AppEnv = getEnv()): string[] {
+  if (env.NODE_ENV !== "production") return [];
+  const issues: string[] = [];
+  if (env.BETTER_AUTH_SECRET === "flowyn-local-development-secret-change-me") issues.push("BETTER_AUTH_SECRET");
+  if (env.WEBHOOK_SECRET_ENCRYPTION_KEY === "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=") issues.push("WEBHOOK_SECRET_ENCRYPTION_KEY");
+  if (env.INTEGRATION_CREDENTIAL_KEYRING_JSON === defaultIntegrationKeyring) issues.push("INTEGRATION_CREDENTIAL_KEYRING_JSON");
+  return issues;
+}
+
+export function assertProductionConfiguration(env: AppEnv = getEnv()): void {
+  const issues = getProductionConfigurationIssues(env);
+  if (issues.length > 0) throw new Error(`Production configuration is invalid: ${issues.join(", ")}`);
+}
+
 export function resetEnvForTests(): void {
   cachedEnv = undefined;
 }

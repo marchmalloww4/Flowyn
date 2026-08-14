@@ -8,6 +8,11 @@ import { getAgentExecutionPolicy } from "@/lib/agents/policy";
 import { agentCreateSchema, agentPatchSchema, type AgentCreateInput, type AgentPatchInput } from "@/lib/agents/validation";
 import { AppError } from "@/lib/security/errors";
 import type { WorkspaceAutomationPrincipal } from "@/lib/security/principal";
+import { acquireWorkspaceReservation, releaseWorkspaceReservation } from "@/lib/concurrency/service";
+import { admitAgentRun } from "@/lib/usage/service";
+import { getWorkspaceUsagePolicy } from "@/lib/usage/policy";
+import type { UsageOperationIdentity } from "@/lib/usage/types";
+import { getCorrelationId } from "@/lib/observability/correlation";
 
 export type AgentDefinition = typeof agents.$inferSelect;
 export type AgentRun = typeof agentRuns.$inferSelect;
@@ -119,43 +124,91 @@ export async function deleteAgent(userId: string, agentId: string, db: Database 
   });
 }
 
-export async function startAgentRun(userId: string, agentId: string, goal: string, db: Database = getDatabase()): Promise<{ agent: AgentDefinition; run: AgentRun; policy: ReturnType<typeof getAgentExecutionPolicy> }> {
-  const agent = await loadAgent(userId, agentId, db);
-  await requireWorkspaceAction(userId, agent.workspaceId, "agent.run", db);
-  if (!agent.enabled) throw new AppError("AGENT_DISABLED", 409, "The agent is disabled.");
-  const policy = getAgentExecutionPolicy(agent.maxSteps);
-  const [run] = await db.insert(agentRuns).values({
-    workspaceId: agent.workspaceId,
-    agentId: agent.id,
-    agentName: agent.name,
-    startedBy: userId,
-    status: "RUNNING",
-    goal,
-    stepCount: 0,
-    startedAt: new Date(),
-  }).returning();
-  if (!run) throw new AppError("AGENT_RUN_CREATE_FAILED", 500, "The agent run could not be created.");
-  await recordAuditEvent({ workspaceId: run.workspaceId, actorUserId: userId, action: "agent.run_started", resourceType: "agent_run", resourceId: run.id, metadata: { agentId: agent.id } }, db);
-  return { agent, run, policy };
+export type AgentStartResult = { agent: AgentDefinition; run: AgentRun; policy: ReturnType<typeof getAgentExecutionPolicy>; releaseReservation?: () => Promise<void>; idempotent: boolean };
+
+async function reserveAgentCapacity(workspaceId: string, ownerId: string, usage: UsageOperationIdentity | undefined, policy: ReturnType<typeof getAgentExecutionPolicy>, db: Database): Promise<(() => Promise<void>) | undefined> {
+  if (!usage) return undefined;
+  const reservation = await acquireWorkspaceReservation({
+    workspaceId,
+    operationClass: "AGENT",
+    sourceId: usage.operationKey,
+    ownerId,
+    limit: getWorkspaceUsagePolicy(workspaceId).limits.concurrentAgents,
+    leaseMs: Math.min(3_600_000, Math.max(1_000, policy.totalTimeoutMs + 30_000)),
+    db,
+  }, db);
+  if (!reservation.acquired || !reservation.reservation) throw new AppError("WORKSPACE_CONCURRENCY_LIMIT", 429, "Workspace agent concurrency limit reached.");
+  const release = async () => {
+    await releaseWorkspaceReservation({ reservationId: reservation.reservation?.id ?? "", workspaceId, ownerId }, db);
+  };
+  try {
+    await admitAgentRun({ workspaceId, ...usage, db });
+  } catch (error) {
+    await release();
+    throw error;
+  }
+  return release;
 }
 
-export async function startAgentRunForPrincipal(principal: WorkspaceAutomationPrincipal, agentId: string, goal: string, db: Database = getDatabase()): Promise<{ agent: AgentDefinition; run: AgentRun; policy: ReturnType<typeof getAgentExecutionPolicy> }> {
+export async function startAgentRun(userId: string, agentId: string, goal: string, db: Database = getDatabase(), usage?: UsageOperationIdentity, idempotencyKey?: string): Promise<AgentStartResult> {
+  const agent = await loadAgent(userId, agentId, db);
+  await requireWorkspaceAction(userId, agent.workspaceId, "agent.run", db);
+  if (idempotencyKey) {
+    const [existing] = await db.select().from(agentRuns).where(and(eq(agentRuns.workspaceId, agent.workspaceId), eq(agentRuns.idempotencyKey, idempotencyKey))).limit(1);
+    if (existing) {
+      if (existing.agentId !== agent.id || existing.goal !== goal) throw new AppError("AGENT_IDEMPOTENCY_CONFLICT", 409, "The Idempotency-Key is already associated with a different agent run.");
+      return { agent, run: existing, policy: getAgentExecutionPolicy(agent.maxSteps), idempotent: true };
+    }
+  }
+  if (!agent.enabled) throw new AppError("AGENT_DISABLED", 409, "The agent is disabled.");
+  const policy = getAgentExecutionPolicy(agent.maxSteps);
+  const releaseReservation = await reserveAgentCapacity(agent.workspaceId, userId, usage, policy, db);
+  try {
+    const [run] = await db.insert(agentRuns).values({
+      workspaceId: agent.workspaceId,
+      agentId: agent.id,
+      agentName: agent.name,
+      startedBy: userId,
+      status: "RUNNING",
+      goal,
+      idempotencyKey: idempotencyKey ?? null,
+      stepCount: 0,
+      correlationId: usage?.correlationId ?? getCorrelationId(),
+      startedAt: new Date(),
+    }).returning();
+    if (!run) throw new AppError("AGENT_RUN_CREATE_FAILED", 500, "The agent run could not be created.");
+    await recordAuditEvent({ workspaceId: run.workspaceId, actorUserId: userId, action: "agent.run_started", resourceType: "agent_run", resourceId: run.id, metadata: { agentId: agent.id } }, db);
+    return { agent, run, policy, releaseReservation, idempotent: false };
+  } catch (error) {
+    await releaseReservation?.();
+    throw error;
+  }
+}
+
+export async function startAgentRunForPrincipal(principal: WorkspaceAutomationPrincipal, agentId: string, goal: string, db: Database = getDatabase(), usage?: UsageOperationIdentity): Promise<AgentStartResult> {
   const agent = await getAgentForWorkspace(principal.workspaceId, agentId, db);
   if (!agent.enabled) throw new AppError("AGENT_DISABLED", 409, "The agent is disabled.");
   const policy = getAgentExecutionPolicy(agent.maxSteps);
-  const [run] = await db.insert(agentRuns).values({
-    workspaceId: agent.workspaceId,
-    agentId: agent.id,
-    agentName: agent.name,
-    startedBy: null,
-    status: "RUNNING",
-    goal,
-    stepCount: 0,
-    startedAt: new Date(),
-  }).returning();
-  if (!run) throw new AppError("AGENT_RUN_CREATE_FAILED", 500, "The agent run could not be created.");
-  await recordAuditEvent({ workspaceId: run.workspaceId, actorUserId: null, action: "agent.run_started", resourceType: "agent_run", resourceId: run.id, metadata: { agentId: agent.id, principalKind: principal.kind, scheduleId: principal.scheduleId } }, db);
-  return { agent, run, policy };
+  const releaseReservation = await reserveAgentCapacity(agent.workspaceId, `${principal.workspaceId}:automation`, usage, policy, db);
+  try {
+    const [run] = await db.insert(agentRuns).values({
+      workspaceId: agent.workspaceId,
+      agentId: agent.id,
+      agentName: agent.name,
+      startedBy: null,
+      status: "RUNNING",
+      goal,
+      stepCount: 0,
+      correlationId: usage?.correlationId ?? getCorrelationId(),
+      startedAt: new Date(),
+    }).returning();
+    if (!run) throw new AppError("AGENT_RUN_CREATE_FAILED", 500, "The agent run could not be created.");
+    await recordAuditEvent({ workspaceId: run.workspaceId, actorUserId: null, action: "agent.run_started", resourceType: "agent_run", resourceId: run.id, metadata: { agentId: agent.id, principalKind: principal.kind, scheduleId: principal.scheduleId } }, db);
+    return { agent, run, policy, releaseReservation, idempotent: false };
+  } catch (error) {
+    await releaseReservation?.();
+    throw error;
+  }
 }
 
 export async function recordAgentRunStep(input: AgentRunStepInput, db: Database = getDatabase()): Promise<void> {

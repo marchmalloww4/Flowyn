@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { requireWorkspaceAction, requireWorkspaceMember } from "@/lib/authz/authorization";
 import { recordAuditEvent } from "@/lib/audit/service";
-import { getDatabase, integrationCredentials, type Database } from "@/lib/database";
+import { getDatabase, integrationCredentials, type Database, workspaces } from "@/lib/database";
 import { getEnv } from "@/lib/env";
 import { AppError } from "@/lib/security/errors";
 import { parseSecretKeyring, type IntegrationSecretContext } from "@/lib/security/keyring";
@@ -11,6 +11,7 @@ import { getConnectorDefinition, parseConnectorSecret } from "@/lib/integrations
 import { integrationCredentialCreateSchema, integrationCredentialPatchSchema, integrationCredentialRotateSchema } from "@/lib/integrations/validation";
 import { getIntegrationCredentialById, listIntegrationCredentials as listRepositoryCredentials, resolveActiveIntegrationCredential as resolveRepositoryCredential, toSafeIntegrationCredential, type IntegrationCredential } from "@/lib/integrations/repository";
 import type { IntegrationCredentialSafe, IntegrationSecretMaterial } from "@/lib/integrations/types";
+import { getWorkspaceUsagePolicy } from "@/lib/usage/policy";
 
 function notFound(): AppError {
   return new AppError("INTEGRATION_CREDENTIAL_NOT_FOUND", 404, "Integration credential not found.");
@@ -49,18 +50,24 @@ export async function createIntegrationCredential(userId: string, input: unknown
   const id = randomUUID();
   const createdAt = new Date();
   const encryptedSecretMaterial = encryptMaterial(parsed.secret, { id, connectorId: parsed.connectorId, secretVersion: 1 });
-  const [created] = await db.insert(integrationCredentials).values({
-    id,
-    workspaceId: parsed.workspaceId,
-    connectorId: parsed.connectorId,
-    name: parsed.name,
-    encryptedSecretMaterial,
-    keyVersion: getEnv().INTEGRATION_CREDENTIAL_CURRENT_KEY_VERSION,
-    secretVersion: 1,
-    createdBy: userId,
-    createdAt,
-    updatedAt: createdAt,
-  }).returning();
+  const [created] = await db.transaction(async (tx) => {
+    const [workspace] = await tx.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, parsed.workspaceId)).for("update").limit(1);
+    if (!workspace) throw new AppError("WORKSPACE_NOT_FOUND", 404, "Workspace not found.");
+    const [usage] = await tx.select({ activeCredentials: sql<number>`count(*)` }).from(integrationCredentials).where(and(eq(integrationCredentials.workspaceId, parsed.workspaceId), isNull(integrationCredentials.revokedAt), isNull(integrationCredentials.deletedAt))).limit(1);
+    if (Number(usage?.activeCredentials ?? 0) >= getWorkspaceUsagePolicy(parsed.workspaceId).limits.integrationCredentials) throw new AppError("WORKSPACE_QUOTA_EXCEEDED", 429, "Workspace integration credential quota exceeded.");
+    return tx.insert(integrationCredentials).values({
+      id,
+      workspaceId: parsed.workspaceId,
+      connectorId: parsed.connectorId,
+      name: parsed.name,
+      encryptedSecretMaterial,
+      keyVersion: getEnv().INTEGRATION_CREDENTIAL_CURRENT_KEY_VERSION,
+      secretVersion: 1,
+      createdBy: userId,
+      createdAt,
+      updatedAt: createdAt,
+    }).returning();
+  });
   if (!created) throw new AppError("INTEGRATION_CREDENTIAL_CREATE_FAILED", 500, "Integration credential could not be created.");
   await recordAuditEvent({ workspaceId: created.workspaceId, actorUserId: userId, action: "integration_credential.created", resourceType: "integration_credential", resourceId: created.id, metadata: { connectorId: created.connectorId, name: created.name, secretVersion: created.secretVersion } }, db);
   return toSafeIntegrationCredential(created);

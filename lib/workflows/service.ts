@@ -15,6 +15,9 @@ import { createDefaultWorkflowLayout, type WorkflowEditorLayout } from "@/lib/wo
 import { parseWorkflowEditorLayout } from "@/lib/workflows/editor-layout";
 import type { JsonValue, WorkflowDefinition } from "@/lib/workflows/types";
 import { workflowCreateSchema, workflowPatchSchema, workflowRunSchema, type WorkflowCreateInput, type WorkflowPatchInput } from "@/lib/workflows/validation";
+import { workflowStartOperationKey } from "@/lib/usage/policy";
+import { admitWorkflowStart } from "@/lib/usage/service";
+import { getCorrelationId } from "@/lib/observability/correlation";
 
 export type WorkflowDefinitionRecord = typeof workflows.$inferSelect;
 export type WorkflowVersion = typeof workflowVersions.$inferSelect;
@@ -257,14 +260,15 @@ export async function createWorkflowRun(userId: string, workflowId: string, inpu
         return existing;
       }
     }
-    const insert = tx.insert(workflowRuns).values({ workspaceId: workflow.workspaceId, workflowId: workflow.id, workflowVersion: version.version, workflowVersionId: version.id, definitionSnapshot: definition, status: "QUEUED", startedBy: userId, input: parsedInput, currentStepId: definition.entryStepId, idempotencyKey: idempotencyKey ?? null });
+    const insert = tx.insert(workflowRuns).values({ workspaceId: workflow.workspaceId, workflowId: workflow.id, workflowVersion: version.version, workflowVersionId: version.id, definitionSnapshot: definition, status: "QUEUED", startedBy: userId, input: parsedInput, currentStepId: definition.entryStepId, idempotencyKey: idempotencyKey ?? null, correlationId: getCorrelationId() });
     const [run] = await (idempotencyKey ? insert.onConflictDoNothing({ target: [workflowRuns.workspaceId, workflowRuns.idempotencyKey] }) : insert).returning();
     if (!run && idempotencyKey) {
       const [existing] = await tx.select().from(workflowRuns).where(and(eq(workflowRuns.workspaceId, workflow.workspaceId), eq(workflowRuns.idempotencyKey, idempotencyKey))).limit(1);
       if (existing) return existing;
     }
     if (!run) throw new AppError("WORKFLOW_RUN_CREATE_FAILED", 500, "Workflow run could not be created.");
-    await tx.insert(workflowRunDispatches).values({ runId: run.id, status: "PENDING", attempts: 0 }).returning();
+    await admitWorkflowStart({ workspaceId: run.workspaceId, operationKey: workflowStartOperationKey(idempotencyKey ?? run.id), sourceType: "WORKFLOW_RUN", sourceId: run.id, correlationId: getCorrelationId(), db: tx });
+    await tx.insert(workflowRunDispatches).values({ runId: run.id, status: "PENDING", attempts: 0, correlationId: getCorrelationId() });
     await recordAuditEvent({ workspaceId: run.workspaceId, actorUserId: userId, action: "workflow.run_queued", resourceType: "workflow_run", resourceId: run.id, metadata: { workflowId: workflow.id, version: version.version } }, tx);
     return run;
   });
@@ -371,6 +375,7 @@ export async function createAutomationWorkflowRun(input: AutomationWorkflowRunIn
     input: parsedInput,
     currentStepId: definition.entryStepId,
     idempotencyKey: input.idempotencyKey,
+    correlationId: getCorrelationId(),
   });
   const [run] = await insert.onConflictDoNothing({ target: [workflowRuns.workspaceId, workflowRuns.idempotencyKey] }).returning();
   if (!run) {
@@ -378,7 +383,8 @@ export async function createAutomationWorkflowRun(input: AutomationWorkflowRunIn
     if (duplicate) return duplicate;
     throw new AppError("WORKFLOW_RUN_CREATE_FAILED", 500, "Workflow run could not be created.");
   }
-  await db.insert(workflowRunDispatches).values({ runId: run.id, status: "PENDING", attempts: 0 }).returning();
+  await admitWorkflowStart({ workspaceId: run.workspaceId, operationKey: workflowStartOperationKey(input.idempotencyKey), sourceType: input.origin.type === "schedule" ? "SCHEDULED_WORKFLOW" : "WEBHOOK_WORKFLOW", sourceId: run.id, correlationId: getCorrelationId(), db });
+  await db.insert(workflowRunDispatches).values({ runId: run.id, status: "PENDING", attempts: 0, correlationId: getCorrelationId() }).returning();
   await recordAuditEvent({
     workspaceId: run.workspaceId,
     actorUserId: null,

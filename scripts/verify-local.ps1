@@ -43,12 +43,19 @@ SELECT 'hnsw_cosine=' || EXISTS (SELECT 1 FROM pg_class idx JOIN pg_index i ON i
 SELECT 'foreign_keys=' || ((SELECT count(*) FROM information_schema.table_constraints WHERE table_schema = 'public' AND table_name IN ('knowledge_documents', 'knowledge_chunks') AND constraint_type = 'FOREIGN KEY') >= 5);
 SELECT 'status_check=' || EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'knowledge_documents_status_check');
 SELECT 'legacy_tables=' || (to_regclass('public.user') IS NOT NULL AND to_regclass('public.workspaces') IS NOT NULL AND to_regclass('public.brands') IS NOT NULL AND to_regclass('public.generation_logs') IS NOT NULL);
+SELECT 'm12_usage_tables=' || (to_regclass('public.workspace_usage_buckets') IS NOT NULL AND to_regclass('public.workspace_usage_admissions') IS NOT NULL);
+SELECT 'm12_concurrency_tables=' || (to_regclass('public.workspace_concurrency_states') IS NOT NULL AND to_regclass('public.workspace_concurrency_reservations') IS NOT NULL);
+SELECT 'm12_usage_constraints=' || (EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workspace_usage_buckets_consumed_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workspace_usage_admissions_units_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workspace_concurrency_states_active_count_check'));
+SELECT 'm12_usage_indexes=' || (to_regclass('public.workspace_usage_buckets_workspace_metric_bucket_idx') IS NOT NULL AND to_regclass('public.workspace_usage_admissions_workspace_metric_operation_idx') IS NOT NULL AND to_regclass('public.workspace_usage_admissions_workspace_created_idx') IS NOT NULL);
+SELECT 'm12_concurrency_indexes=' || (to_regclass('public.workspace_concurrency_states_workspace_operation_idx') IS NOT NULL AND to_regclass('public.workspace_concurrency_reservations_source_idx') IS NOT NULL AND to_regclass('public.workspace_concurrency_reservations_workspace_expiry_idx') IS NOT NULL);
+SELECT 'm12_agent_idempotency=' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'agent_runs' AND column_name = 'idempotency_key') AND to_regclass('public.agent_runs_workspace_idempotency_idx') IS NOT NULL);
 SELECT 'workflow_tables=' || (to_regclass('public.workflows') IS NOT NULL AND to_regclass('public.workflow_versions') IS NOT NULL AND to_regclass('public.workflow_runs') IS NOT NULL AND to_regclass('public.workflow_step_runs') IS NOT NULL AND to_regclass('public.workflow_run_dispatches') IS NOT NULL);
 SELECT 'workflow_status_checks=' || (EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_runs_status_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_step_runs_status_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_run_dispatches_status_check'));
 SELECT 'workflow_version_unique=' || (to_regclass('public.workflow_versions_workflow_version_idx') IS NOT NULL);
 SELECT 'workflow_idempotency_unique=' || (to_regclass('public.workflow_runs_workspace_idempotency_idx') IS NOT NULL);
 SELECT 'workflow_step_execution_token=' || EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_step_runs' AND column_name = 'execution_token');
 SELECT 'workflow_dispatch_fields=' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_run_dispatches' AND column_name = 'lease_expires_at') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_run_dispatches' AND column_name = 'dispatcher_id'));
+SELECT 'm12_dispatch_fields=' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_run_dispatches' AND column_name = 'next_attempt_at') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_run_dispatches' AND column_name = 'defer_count') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_run_dispatches' AND column_name = 'defer_reason') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_run_dispatches' AND column_name = 'correlation_id'));
 SELECT 'workflow_indexes=' || (to_regclass('public.workflow_runs_status_idx') IS NOT NULL AND to_regclass('public.workflow_step_runs_attempt_idx') IS NOT NULL AND to_regclass('public.workflow_run_dispatches_status_idx') IS NOT NULL);
 SELECT 'schedule_tables=' || (to_regclass('public.workflow_schedules') IS NOT NULL AND to_regclass('public.workflow_schedule_occurrences') IS NOT NULL);
 SELECT 'schedule_occurrence_unique=' || (to_regclass('public.workflow_schedule_occurrences_schedule_scheduled_idx') IS NOT NULL);
@@ -67,6 +74,7 @@ SELECT 'workflow_editor_layout_foreign_keys=' || ((SELECT count(*) FROM informat
 SELECT 'integration_tables=' || (to_regclass('public.integration_credentials') IS NOT NULL AND to_regclass('public.integration_action_runs') IS NOT NULL);
 SELECT 'integration_constraints=' || (EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'integration_credentials_secret_version_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'integration_action_runs_status_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'integration_action_runs_attempt_check'));
 SELECT 'integration_indexes=' || (to_regclass('public.integration_credentials_workspace_name_idx') IS NOT NULL AND to_regclass('public.integration_action_runs_workspace_idempotency_idx') IS NOT NULL AND to_regclass('public.integration_action_runs_logical_action_idx') IS NOT NULL AND to_regclass('public.integration_action_runs_workflow_run_idx') IS NOT NULL);
+SELECT 'm12_correlation_fields=' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'generation_logs' AND column_name = 'correlation_id') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_runs' AND column_name = 'correlation_id') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'integration_action_runs' AND column_name = 'correlation_id'));
 "@
   $output = & $dockerCommand compose exec -T postgres psql -U flowyn -d $DatabaseName -Atc $query
   if ($LASTEXITCODE -ne 0) { throw "PostgreSQL schema inspection failed for database $DatabaseName." }
@@ -85,12 +93,19 @@ SELECT 'integration_indexes=' || (to_regclass('public.integration_credentials_wo
     "foreign_keys=true",
     "status_check=true",
     "legacy_tables=true",
+    "m12_usage_tables=true",
+    "m12_concurrency_tables=true",
+    "m12_usage_constraints=true",
+    "m12_usage_indexes=true",
+    "m12_concurrency_indexes=true",
+    "m12_agent_idempotency=true",
     "workflow_tables=true",
     "workflow_status_checks=true",
     "workflow_version_unique=true",
     "workflow_idempotency_unique=true",
     "workflow_step_execution_token=true",
     "workflow_dispatch_fields=true",
+    "m12_dispatch_fields=true",
     "workflow_indexes=true",
     "schedule_tables=true",
     "schedule_occurrence_unique=true",
@@ -109,6 +124,7 @@ SELECT 'integration_indexes=' || (to_regclass('public.integration_credentials_wo
     "integration_tables=true",
     "integration_constraints=true",
     "integration_indexes=true"
+    ,"m12_correlation_fields=true"
   )
   foreach ($expected in $required) {
     if ($checks -notcontains $expected) { throw "PostgreSQL schema check failed for ${DatabaseName}: expected $expected, got $($checks -join ', ')." }
@@ -194,7 +210,7 @@ try {
   Assert-DatabaseSchema "flowyn" $verifiedEmbeddingDimension
 
   Write-Host "Applying migrations to a temporary clean database..."
-  $temporaryDatabase = "flowyn_milestone11_verify"
+  $temporaryDatabase = "flowyn_milestone12_verify"
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "postgres", "dropdb", "--if-exists", "-U", "flowyn", $temporaryDatabase)
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "postgres", "createdb", "-U", "flowyn", $temporaryDatabase)
   try {
@@ -244,7 +260,7 @@ try {
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run")
   Invoke-RequiredCommand $npmCommand @("run", "build")
 
-  Write-Host "Milestone 11 local verification passed."
+  Write-Host "Milestone 12 local verification passed."
 } finally {
   if ($null -eq $previousRunOllamaIntegration) { Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue }
   else { $env:RUN_OLLAMA_INTEGRATION = $previousRunOllamaIntegration }

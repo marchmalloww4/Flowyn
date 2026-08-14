@@ -6,9 +6,12 @@ import { AppError } from "@/lib/security/errors";
 import { workflowRuns, workflowVersions } from "@/lib/database/schema";
 import { createWorkflow, createWorkflowRun, cancelWorkflowRun } from "@/lib/workflows/service";
 
+const { admitWorkflowStart } = vi.hoisted(() => ({ admitWorkflowStart: vi.fn().mockResolvedValue(undefined) }));
+
 vi.mock("@/lib/brands/service", () => ({ getBrand: vi.fn() }));
 vi.mock("@/lib/authz/authorization", () => ({ requireWorkspaceAction: vi.fn(), requireWorkspaceMember: vi.fn() }));
 vi.mock("@/lib/audit/service", () => ({ recordAuditEvent: vi.fn() }));
+vi.mock("@/lib/usage/service", () => ({ admitWorkflowStart }));
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const workflowId = "22222222-2222-4222-8222-222222222222";
@@ -48,7 +51,8 @@ const version = {
 };
 
 function insertResult(rows: unknown[]) {
-  return { values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue(rows) }) };
+  const result = { returning: vi.fn().mockResolvedValue(rows) };
+  return { values: vi.fn().mockReturnValue({ ...result, onConflictDoNothing: vi.fn().mockReturnValue(result) }) };
 }
 
 function updateResult(rows: unknown[]) {
@@ -110,6 +114,15 @@ describe("workflow service", () => {
 
     await expect(createWorkflowRun(userId, workflowId, { value: "input" }, "request-1", db as never)).resolves.toMatchObject({ id: runId });
     expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it("admits a new workflow start inside the durable run transaction", async () => {
+    const db = database({ runRows: [] });
+    db.insert.mockReset();
+    db.insert.mockReturnValueOnce(insertResult([{ id: runId, workspaceId, workflowId, status: "QUEUED" }])).mockReturnValueOnce(insertResult([{ id: "dispatch-id", runId, status: "PENDING" }]));
+
+    await expect(createWorkflowRun(userId, workflowId, { value: "input" }, "request-2", db as never)).resolves.toMatchObject({ id: runId });
+    expect(admitWorkflowStart).toHaveBeenCalledWith(expect.objectContaining({ workspaceId, operationKey: "workflow-start:request-2", sourceType: "WORKFLOW_RUN", sourceId: runId, db: expect.anything() }));
   });
 
   it("does not allow an ordinary member to cancel another member's run", async () => {

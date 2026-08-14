@@ -12,6 +12,9 @@ import { buildSignedMessage, createWebhookDedupeKey, createWebhookIdempotencyKey
 import { decryptActiveWebhookSecret, webhookEventExpiry } from "@/lib/webhooks/service";
 import { validateWebhookPayload } from "@/lib/webhooks/validation";
 import type { JsonValue } from "@/lib/workflows/types";
+import { admitAcceptedWebhook } from "@/lib/usage/service";
+import { webhookOperationKey } from "@/lib/usage/policy";
+import { getCorrelationId } from "@/lib/observability/correlation";
 
 export interface WebhookIngressInput {
   publicId: string;
@@ -118,6 +121,8 @@ export async function ingestWebhookDelivery(input: WebhookIngressInput): Promise
         return { accepted: true, duplicate: true };
       }
 
+      await admitAcceptedWebhook({ workspaceId: trigger.workspaceId, operationKey: webhookOperationKey(trigger.id, dedupe.key), sourceType: "WEBHOOK_EVENT", sourceId: inserted.id, correlationId: getCorrelationId(), db: tx });
+
       const [workflow] = await tx.select().from(workflows)
         .where(and(eq(workflows.id, trigger.workflowId), eq(workflows.workspaceId, trigger.workspaceId)))
         .limit(1);
@@ -143,7 +148,7 @@ export async function ingestWebhookDelivery(input: WebhookIngressInput): Promise
       return { accepted: true, duplicate: false };
     });
   } catch (error) {
-    if (error instanceof AppError && ["WEBHOOK_ACCEPTANCE_UNAVAILABLE", "WEBHOOK_RATE_LIMIT_UNAVAILABLE"].includes(error.code)) throw error;
+    if (error instanceof AppError && ["WEBHOOK_ACCEPTANCE_UNAVAILABLE", "WEBHOOK_RATE_LIMIT_UNAVAILABLE", "WORKSPACE_RATE_LIMIT_UNAVAILABLE", "WORKSPACE_RATE_LIMIT_EXCEEDED", "WORKSPACE_QUOTA_EXCEEDED"].includes(error.code)) throw error;
     throw unavailable();
   }
 }

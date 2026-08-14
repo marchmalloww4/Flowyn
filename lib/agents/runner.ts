@@ -9,6 +9,9 @@ import { agentRunSchema } from "@/lib/agents/validation";
 import { getDatabase, type Database } from "@/lib/database";
 import { AppError } from "@/lib/security/errors";
 import { userExecutionPrincipal, type ExecutionPrincipal } from "@/lib/security/principal";
+import { agentDecisionOperationKey } from "@/lib/usage/policy";
+import { admitAgentDecision } from "@/lib/usage/service";
+import type { UsageOperationIdentity } from "@/lib/usage/types";
 
 export interface RunAgentInput {
   userId?: string;
@@ -19,6 +22,8 @@ export interface RunAgentInput {
   registry?: ToolRegistry;
   db?: Database;
   abortSignal?: AbortSignal;
+  usage?: UsageOperationIdentity;
+  idempotencyKey?: string;
   onRunCreated?: (run: AgentRun) => Promise<void>;
 }
 
@@ -150,9 +155,19 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult>
   const principal = input.principal ?? (input.userId ? userExecutionPrincipal(input.userId) : undefined);
   if (!principal) throw new AppError("AGENT_PRINCIPAL_REQUIRED", 500, "Agent execution requires a verified execution principal.");
   const started = principal.kind === "workspace_automation"
-    ? await startAgentRunForPrincipal(principal, input.agentId, parsedGoal.goal, db)
-    : await startAgentRun(principal.userId, input.agentId, parsedGoal.goal, db);
-  await input.onRunCreated?.(started.run);
+    ? await startAgentRunForPrincipal(principal, input.agentId, parsedGoal.goal, db, input.usage)
+    : await startAgentRun(principal.userId, input.agentId, parsedGoal.goal, db, input.usage, input.idempotencyKey);
+  if (started.idempotent) {
+    if (started.run.status === "COMPLETED") return resultFromRun(started.run, started.run.id, "COMPLETED", started.run.stepCount, started.run.finalResponse, null);
+    if (started.run.status === "MAX_STEPS_REACHED") return resultFromRun(started.run, started.run.id, "MAX_STEPS_REACHED", started.run.stepCount, started.run.finalResponse, started.run.errorCode);
+    throw new AgentRunError("AGENT_RUN_ALREADY_EXISTS", 409, "An agent run already exists for this Idempotency-Key.", started.run.id);
+  }
+  try {
+    await input.onRunCreated?.(started.run);
+  } catch (error) {
+    await started.releaseReservation?.();
+    throw error;
+  }
   const provider = input.provider ?? getAIProvider();
   const registry = input.registry ?? createDefaultToolRegistry();
   const rootController = new AbortController();
@@ -171,6 +186,7 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult>
     const effectiveTools = registry.getEffectiveTools(started.agent.allowedTools, { brandId: started.agent.brandId ?? undefined });
     const publicTools = registry.getPublicDefinitions(started.agent.allowedTools, { brandId: started.agent.brandId ?? undefined });
     const observations: Array<{ toolName: string; text: string }> = [];
+    const admittedDecisionKeys = new Set<string>();
 
     for (stepCount = 1; stepCount <= started.policy.maxSteps; stepCount += 1) {
       let decision: AgentDecision | undefined;
@@ -186,6 +202,13 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult>
           policy: { maxSteps: started.policy.maxSteps, maxObservationChars: started.policy.maxObservationChars },
         });
         operation = "model";
+        if (input.usage) {
+          const operationKey = agentDecisionOperationKey(started.run.id, stepCount);
+          if (!admittedDecisionKeys.has(operationKey)) {
+            await admitAgentDecision({ workspaceId: started.run.workspaceId, operationKey, sourceType: "AGENT_DECISION", sourceId: started.run.id, correlationId: input.usage.correlationId, db });
+            admittedDecisionKeys.add(operationKey);
+          }
+        }
         const modelResult = await runWithTimeout(
           (signal) => provider.generateStructured({ prompt: built.prompt, system: correctionFeedback ? `${built.system}\nServer validation feedback: ${correctionFeedback}` : built.system, schema: agentDecisionSchema, format: buildAgentDecisionJsonSchema(effectiveTools), temperature: 0, maxTokens: 400, signal }),
           rootController.signal,
@@ -311,5 +334,10 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult>
   } finally {
     clearTimeout(totalTimer);
     input.abortSignal?.removeEventListener("abort", externalAbort);
+    try {
+      await started.releaseReservation?.();
+    } catch (releaseError) {
+      console.error("Agent reservation release failed", safeErrorCode(releaseError));
+    }
   }
 }

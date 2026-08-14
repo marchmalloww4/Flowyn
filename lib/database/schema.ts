@@ -90,6 +90,69 @@ export const workspaceMembers = pgTable(
   }),
 );
 
+export type WorkspaceUsageMetric =
+  | "AI_GENERATION_DAY"
+  | "AGENT_RUN_DAY"
+  | "WORKFLOW_START_DAY"
+  | "INTEGRATION_ACTION_DAY"
+  | "WEBHOOK_ACCEPTED_MINUTE";
+
+export const workspaceUsageBuckets = pgTable("workspace_usage_buckets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  metric: text("metric").$type<WorkspaceUsageMetric>().notNull(),
+  bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+  consumed: integer("consumed").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  workspaceMetricBucketIdx: uniqueIndex("workspace_usage_buckets_workspace_metric_bucket_idx").on(table.workspaceId, table.metric, table.bucketStart),
+  workspaceBucketIdx: index("workspace_usage_buckets_workspace_bucket_idx").on(table.workspaceId, table.bucketStart),
+  consumedCheck: check("workspace_usage_buckets_consumed_check", sql`${table.consumed} >= 0`),
+}));
+
+export const workspaceUsageAdmissions = pgTable("workspace_usage_admissions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  metric: text("metric").$type<WorkspaceUsageMetric>().notNull(),
+  operationKey: text("operation_key").notNull(),
+  sourceType: text("source_type").notNull(),
+  sourceId: text("source_id"),
+  bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+  units: integer("units").notNull().default(1),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  workspaceMetricOperationIdx: uniqueIndex("workspace_usage_admissions_workspace_metric_operation_idx").on(table.workspaceId, table.metric, table.operationKey),
+  workspaceCreatedIdx: index("workspace_usage_admissions_workspace_created_idx").on(table.workspaceId, table.createdAt),
+  unitsCheck: check("workspace_usage_admissions_units_check", sql`${table.units} > 0`),
+}));
+
+export type WorkspaceConcurrencyOperation = "AGENT" | "WORKFLOW" | "INTEGRATION";
+
+export const workspaceConcurrencyStates = pgTable("workspace_concurrency_states", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  operationClass: text("operation_class").$type<WorkspaceConcurrencyOperation>().notNull(),
+  activeCount: integer("active_count").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  workspaceOperationUnique: uniqueIndex("workspace_concurrency_states_workspace_operation_idx").on(table.workspaceId, table.operationClass),
+  activeCountCheck: check("workspace_concurrency_states_active_count_check", sql`${table.activeCount} >= 0`),
+}));
+
+export const workspaceConcurrencyReservations = pgTable("workspace_concurrency_reservations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  operationClass: text("operation_class").$type<WorkspaceConcurrencyOperation>().notNull(),
+  sourceId: text("source_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  releasedAt: timestamp("released_at", { withTimezone: true }),
+}, (table) => ({
+  workspaceExpiryIdx: index("workspace_concurrency_reservations_workspace_expiry_idx").on(table.workspaceId, table.operationClass, table.expiresAt),
+  sourceUnique: uniqueIndex("workspace_concurrency_reservations_source_idx").on(table.workspaceId, table.operationClass, table.sourceId).where(sql`${table.releasedAt} is null`),
+}));
+
 export const brands = pgTable("brands", {
   id: uuid("id").defaultRandom().primaryKey(),
   workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
@@ -189,6 +252,7 @@ export const generationLogs = pgTable("generation_logs", {
   inputChars: integer("input_chars").notNull(),
   outputChars: integer("output_chars"),
   errorCode: text("error_code"),
+  correlationId: text("correlation_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   statusCheck: check("generation_logs_status_check", sql`${table.status} in ('SUCCEEDED', 'FAILED')`),
@@ -227,9 +291,11 @@ export const agentRuns = pgTable("agent_runs", {
   startedBy: text("started_by").references(() => user.id, { onDelete: "set null" }),
   status: text("status").$type<AgentRunStatus>().notNull().default("PENDING"),
   goal: text("goal").notNull(),
+  idempotencyKey: text("idempotency_key"),
   stepCount: integer("step_count").notNull().default(0),
   finalResponse: text("final_response"),
   errorCode: text("error_code"),
+  correlationId: text("correlation_id"),
   startedAt: timestamp("started_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   ...timestamps,
@@ -237,6 +303,7 @@ export const agentRuns = pgTable("agent_runs", {
   workspaceCreatedIdx: index("agent_runs_workspace_created_idx").on(table.workspaceId, table.createdAt),
   agentIdx: index("agent_runs_agent_idx").on(table.agentId),
   statusIdx: index("agent_runs_status_idx").on(table.workspaceId, table.status),
+  idempotencyIdx: uniqueIndex("agent_runs_workspace_idempotency_idx").on(table.workspaceId, table.idempotencyKey),
   statusCheck: check("agent_runs_status_check", sql`${table.status} in ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'MAX_STEPS_REACHED')`),
 }));
 
@@ -328,6 +395,7 @@ export const workflowRuns = pgTable("workflow_runs", {
   output: jsonb("output").$type<JsonValue>(),
   currentStepId: text("current_step_id"),
   idempotencyKey: text("idempotency_key"),
+  correlationId: text("correlation_id"),
   executionToken: text("execution_token"),
   leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
   cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
@@ -514,6 +582,7 @@ export const integrationActionRuns = pgTable("integration_action_runs", {
   safeResponseMetadata: jsonb("safe_response_metadata").$type<Record<string, string | number | boolean | null>>().default({}).notNull(),
   safeOutput: jsonb("safe_output").$type<JsonValue>(),
   errorCode: text("error_code"),
+  correlationId: text("correlation_id"),
   leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
   startedAt: timestamp("started_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -537,6 +606,10 @@ export const workflowRunDispatches = pgTable("workflow_run_dispatches", {
   dispatcherId: text("dispatcher_id"),
   leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
   lastError: text("last_error"),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+  deferCount: integer("defer_count").notNull().default(0),
+  deferReason: text("defer_reason"),
+  correlationId: text("correlation_id"),
   dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -545,6 +618,7 @@ export const workflowRunDispatches = pgTable("workflow_run_dispatches", {
   statusCheck: check("workflow_run_dispatches_status_check", sql`${table.status} in ('PENDING', 'CLAIMED', 'DISPATCHED', 'FAILED')`),
   attemptsCheck: check("workflow_run_dispatches_attempts_check", sql`${table.attempts} >= 0`),
   dispatchGenerationCheck: check("workflow_run_dispatches_generation_check", sql`${table.dispatchGeneration} >= 0`),
+  deferCountCheck: check("workflow_run_dispatches_defer_count_check", sql`${table.deferCount} >= 0`),
 }));
 
 export type KnowledgeIndexStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
@@ -757,6 +831,10 @@ export const schema = {
   brandRules,
   brandExamples,
   auditLogs,
+  workspaceUsageBuckets,
+  workspaceUsageAdmissions,
+  workspaceConcurrencyStates,
+  workspaceConcurrencyReservations,
   generationLogs,
   agents,
   agentRuns,

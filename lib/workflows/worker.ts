@@ -6,6 +6,7 @@ import { dispatchPendingWorkflowRuns } from "@/lib/workflows/outbox";
 import { getWorkflowExecutionPolicy } from "@/lib/workflows/policy";
 import { WORKFLOW_QUEUE_NAME, type WorkflowJobData } from "@/lib/workflows/queue";
 import type { WorkflowStepRegistry } from "@/lib/workflows/registry";
+import { runWithCorrelationId } from "@/lib/observability/correlation";
 
 const HEARTBEAT_KEY = "flowyn:worker:heartbeat";
 const HEARTBEAT_TTL_SECONDS = 30;
@@ -26,7 +27,7 @@ export async function startWorkflowWorker(options: Partial<WorkflowWorkerOptions
     await connection.set(HEARTBEAT_KEY, workerId, "EX", HEARTBEAT_TTL_SECONDS);
   };
   await refreshHeartbeat();
-  const worker = new Worker<WorkflowJobData>(WORKFLOW_QUEUE_NAME, async (job) => executeWorkflowRun({ runId: job.data.runId, workerId, registry: options.registry }), { connection, concurrency });
+  const worker = new Worker<WorkflowJobData>(WORKFLOW_QUEUE_NAME, async (job) => runWithCorrelationId(job.data.correlationId ?? randomUUID(), () => executeWorkflowRun({ runId: job.data.runId, workerId, registry: options.registry, ...(job.data.reservationId && job.data.reservationOwnerId ? { dispatchHandoff: { reservationId: job.data.reservationId, reservationOwnerId: job.data.reservationOwnerId, generation: job.data.generation ?? 0, correlationId: job.data.correlationId } } : {}) })), { connection, concurrency });
   const heartbeatTimer = setInterval(() => { void refreshHeartbeat().catch(() => undefined); }, Math.floor(HEARTBEAT_TTL_SECONDS * 1000 / 2));
   const dispatchTimer = setInterval(() => { void dispatchPendingWorkflowRuns({ dispatcherId: workerId }).catch(() => undefined); }, 5000);
   await dispatchPendingWorkflowRuns({ dispatcherId: workerId });

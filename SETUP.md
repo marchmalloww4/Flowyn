@@ -136,6 +136,16 @@ The dashboard Agents panel manages workspace-owned definitions and lets members 
 
 scripts/verify-local.ps1 performs a live finite-vector probe, uses that verified dimension when checking PostgreSQL, and runs the guarded Ollama/pgvector/RAG/agent/workflow/scheduling/integration tests. These checks require the existing Docker services and database migration to be available; they do not reset volumes. Real Slack tests are opt-in only and require `RUN_SLACK_INTEGRATION=1`, `INTEGRATION_TEST_SLACK_TOKEN`, and `INTEGRATION_TEST_SLACK_CHANNEL`.
 
+## Milestone 12 operations and limits
+
+Milestone 12 resolves every workspace to the local `SELF_HOSTED` policy. Initial limits are enforced server-side: 30 AI generations per minute and 500 per day; 2 concurrent agents and 120 agent runs per day; 10 concurrent workflows, 60 workflow starts per minute and 1,000 per day; 300 newly accepted webhooks per minute; 50 active schedules; 100 knowledge documents and 10,000,000 knowledge characters; 20 integration credentials; and 2 concurrent integration actions, 30 per minute, and 300 per day.
+
+Daily and durable admissions are authoritative in PostgreSQL. Redis provides only bounded short-window rate limiting and expensive or externally affecting operations fail closed when it is unavailable. The `/api/health` endpoint remains liveness; `/api/health/ready` reports `ready`, `degraded` (Ollama unavailable), or `not_ready` (configuration, PostgreSQL, Redis, or migration unavailable).
+
+OWNER and ADMIN users can view safe workspace usage and operations projections at `/api/workspaces/:id/usage` and `/api/workspaces/:id/operations`. MEMBER users receive the normal authorization denial. These projections never include prompts, model responses, webhook bodies, credential material, provider payloads, or queue payloads.
+
+The scheduler performs bounded cleanup of short-lived generation logs, schedule occurrences, old usage admission keys, and expired/released concurrency reservations. Workflows, workflow definitions, agent history, knowledge, audit history, approval decisions, credential lifecycle history, and ambiguous integration actions are not automatically deleted.
+
 The dashboard Workflows panel accepts a strict JSON definition and creates immutable versions. Runs are queued through a PostgreSQL outbox and BullMQ, then executed by the worker. Supported steps are SET_VALUE, TRANSFORM, CONDITION, AI_GENERATE, AGENT, APPROVAL, and INTEGRATION_ACTION. APPROVAL requires `requiredRole` OWNER or ADMIN and may specify `expiresAfterSeconds` from 60 through 31,536,000 seconds; an absent value waits indefinitely. The worker releases its lease while waiting. Approval resumes the same immutable snapshot through a generation-aware outbox continuation; rejection, expiration, and waiting cancellation are terminal. An integration action is valid only when every reachable path crosses an approval-required APPROVAL step and its credential ID belongs to the workflow workspace.
 
 The dashboard Workflow schedules panel creates CRON, INTERVAL, and ONE_TIME schedules for existing workflows. Schedule state and occurrence history are stored in PostgreSQL; the scheduler service polls due rows, creates the existing durable workflow run/outbox records, and the worker executes them. Check the scheduler with docker compose exec scheduler npm run scheduler:health. Members can view schedules and history; admins and owners can mutate them.
@@ -152,6 +162,7 @@ Invoke-RestMethod http://localhost:3000/api/health/postgres
 Invoke-RestMethod http://localhost:3000/api/health/redis
 Invoke-RestMethod http://localhost:3000/api/health/ollama
 Invoke-RestMethod http://localhost:3000/api/ai/health
+Invoke-RestMethod http://localhost:3000/api/health/ready
 Invoke-RestMethod http://localhost:11434/api/tags
 ```
 

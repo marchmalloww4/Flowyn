@@ -2,7 +2,7 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1 through 11**:
+This repository currently contains **Milestones 1 through 12**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -21,9 +21,10 @@ This repository currently contains **Milestones 1 through 11**:
 - Durable human approval gates with a static APPROVAL workflow step, PostgreSQL-owned waiting/decision/expiration/cancellation state, protected workspace approval inbox APIs, safe bounded approval context, and generation-aware workflow continuation dispatch.
 - A server-validated visual workflow editor that projects the existing seven-step workflow definition into a React Flow canvas, persists layout separately, supports Advanced JSON round-tripping, and rejects stale saves with optimistic `currentVersionId` concurrency.
 - A workspace-isolated encrypted integration credential vault, static Slack `post_message` connector, fixed-target bounded egress, approval-aware `INTEGRATION_ACTION` workflow step, PostgreSQL-authoritative idempotent action state, safe recovery semantics, and protected credential-management APIs.
+- Production hardening with server-resolved SELF_HOSTED usage limits, PostgreSQL-authoritative quota admission and concurrency leases, bounded Redis rate limiting, workflow dispatch deferral, correlation-safe structured logging, readiness diagnostics, bounded retention cleanup, workspace operations projections, and production configuration validation.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, Ollama behavior, agent policy, runner boundaries, protected APIs, and safe persistence.
 
-OAuth, generic HTTP, arbitrary outbound targets, billing, browser automation, file uploads, and general DAG or loop orchestration remain outside Milestone 11 and are intentionally deferred.
+OAuth, generic HTTP, arbitrary outbound targets, billing, browser automation, file uploads, and general DAG or loop orchestration remain outside Milestone 12 and are intentionally deferred.
 
 ## Quick start
 
@@ -88,11 +89,14 @@ Workflow endpoints are /api/workflows, /api/workflows/:id/runs, /api/workflow-ru
 - `/api/health/postgres`
 - `/api/health/redis`
 - `/api/health/ollama`
+- `/api/health/ready`
 - `/api/ai/health`
 - `/api/knowledge`
 - `/api/knowledge/retrieve`
 - `/api/agents?workspaceId=...`
 - `/api/agent-runs/:id`
+- `/api/workspaces/:id/usage`
+- `/api/workspaces/:id/operations`
 
 The scheduler supports five-field CRON expressions, IANA timezones, intervals from `SCHEDULE_MIN_INTERVAL_SECONDS` through `SCHEDULE_MAX_INTERVAL_SECONDS`, and RFC3339 one-time instants. `SKIP` and `FIRE_ONCE` misfires are bounded by `SCHEDULE_MISFIRE_GRACE_SECONDS`.
 

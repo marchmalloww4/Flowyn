@@ -20,6 +20,7 @@ export interface ClaimIntegrationActionInput {
   credentialSecretVersion: number;
   leaseMs?: number;
   now?: Date;
+  correlationId?: string | null;
 }
 
 export interface IntegrationActionClaim {
@@ -101,7 +102,7 @@ export async function claimIntegrationAction(input: ClaimIntegrationActionInput,
       const [created] = await db.insert(integrationActionRuns).values({
         id: randomUUID(), workspaceId: input.workspaceId, workflowRunId: input.workflowRunId, workflowStepId: input.workflowStepId, workflowStepRunId: input.workflowStepRunId,
         connectorId: input.connectorId, operation: input.operation, credentialId: input.credentialId, credentialSecretVersion: input.credentialSecretVersion,
-        idempotencyKey, attempt: 1, status: "IN_FLIGHT", leaseExpiresAt: leaseExpiry(now, input.leaseMs ?? getEnv().WORKFLOW_EXECUTION_LEASE_MS), startedAt: now, updatedAt: now,
+        idempotencyKey, attempt: 1, status: "IN_FLIGHT", correlationId: input.correlationId ?? null, leaseExpiresAt: leaseExpiry(now, input.leaseMs ?? getEnv().WORKFLOW_EXECUTION_LEASE_MS), startedAt: now, updatedAt: now,
       }).returning();
       if (created) return { disposition: "CLAIMED", action: created };
     } catch {
