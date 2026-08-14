@@ -50,6 +50,13 @@ describe("workspace-scoped generation service", () => {
     expect(prepared.providerInput.prompt).toBe("User instructions:\nHello\n\nBrand context:\nName: Acme\nTone: clear");
   });
 
+  it("carries an AbortSignal into the provider input", async () => {
+    const abortSignal = new AbortController().signal;
+    const prepared = await prepareGeneration({ userId: "user-1", workspaceId: "11111111-1111-4111-8111-111111111111", prompt: "Hello", abortSignal }, provider);
+
+    expect(prepared.providerInput.signal).toBe(abortSignal);
+  });
+
   it("logs successful generation metadata without prompt or response content", async () => {
     const prepared = await prepareGeneration({ userId: "user-1", workspaceId: "11111111-1111-4111-8111-111111111111", prompt: "Hello" }, provider);
     await expect(generateText(prepared, {} as never)).resolves.toMatchObject({ text: "Generated output" });

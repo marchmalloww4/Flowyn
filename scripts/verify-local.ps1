@@ -8,6 +8,8 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $projectRoot
 $previousRunOllamaIntegration = $env:RUN_OLLAMA_INTEGRATION
 $previousRunAgentIntegration = $env:RUN_AGENT_INTEGRATION
+$previousRunWorkflowIntegration = $env:RUN_WORKFLOW_INTEGRATION
+$previousRunWorkflowOllamaIntegration = $env:RUN_WORKFLOW_OLLAMA_INTEGRATION
 
 $dockerCommand = (Get-Command docker -ErrorAction SilentlyContinue).Source
 if (-not $dockerCommand) {
@@ -35,6 +37,13 @@ SELECT 'hnsw_cosine=' || EXISTS (SELECT 1 FROM pg_class idx JOIN pg_index i ON i
 SELECT 'foreign_keys=' || ((SELECT count(*) FROM information_schema.table_constraints WHERE table_schema = 'public' AND table_name IN ('knowledge_documents', 'knowledge_chunks') AND constraint_type = 'FOREIGN KEY') >= 5);
 SELECT 'status_check=' || EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'knowledge_documents_status_check');
 SELECT 'legacy_tables=' || (to_regclass('public.user') IS NOT NULL AND to_regclass('public.workspaces') IS NOT NULL AND to_regclass('public.brands') IS NOT NULL AND to_regclass('public.generation_logs') IS NOT NULL);
+SELECT 'workflow_tables=' || (to_regclass('public.workflows') IS NOT NULL AND to_regclass('public.workflow_versions') IS NOT NULL AND to_regclass('public.workflow_runs') IS NOT NULL AND to_regclass('public.workflow_step_runs') IS NOT NULL AND to_regclass('public.workflow_run_dispatches') IS NOT NULL);
+SELECT 'workflow_status_checks=' || (EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_runs_status_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_step_runs_status_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_run_dispatches_status_check'));
+SELECT 'workflow_version_unique=' || (to_regclass('public.workflow_versions_workflow_version_idx') IS NOT NULL);
+SELECT 'workflow_idempotency_unique=' || (to_regclass('public.workflow_runs_workspace_idempotency_idx') IS NOT NULL);
+SELECT 'workflow_step_execution_token=' || EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_step_runs' AND column_name = 'execution_token');
+SELECT 'workflow_dispatch_fields=' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_run_dispatches' AND column_name = 'lease_expires_at') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_run_dispatches' AND column_name = 'dispatcher_id'));
+SELECT 'workflow_indexes=' || (to_regclass('public.workflow_runs_status_idx') IS NOT NULL AND to_regclass('public.workflow_step_runs_attempt_idx') IS NOT NULL AND to_regclass('public.workflow_run_dispatches_status_idx') IS NOT NULL);
 "@
   $output = & $dockerCommand compose exec -T postgres psql -U flowyn -d $DatabaseName -Atc $query
   if ($LASTEXITCODE -ne 0) { throw "PostgreSQL schema inspection failed for database $DatabaseName." }
@@ -52,7 +61,14 @@ SELECT 'legacy_tables=' || (to_regclass('public.user') IS NOT NULL AND to_regcla
     "hnsw_cosine=true",
     "foreign_keys=true",
     "status_check=true",
-    "legacy_tables=true"
+    "legacy_tables=true",
+    "workflow_tables=true",
+    "workflow_status_checks=true",
+    "workflow_version_unique=true",
+    "workflow_idempotency_unique=true",
+    "workflow_step_execution_token=true",
+    "workflow_dispatch_fields=true",
+    "workflow_indexes=true"
   )
   foreach ($expected in $required) {
     if ($checks -notcontains $expected) { throw "PostgreSQL schema check failed for ${DatabaseName}: expected $expected, got $($checks -join ', ')." }
@@ -108,6 +124,7 @@ try {
   Wait-HttpEndpoint "http://localhost:3000/api/health/redis"
   Wait-HttpEndpoint "http://localhost:11434/api/tags"
   Wait-HttpEndpoint "http://localhost:3000/api/health/ollama"
+  Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "worker", "npm", "run", "worker:health")
 
   Write-Host "Checking the verified local embedding model..."
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "ollama", "ollama", "show", "nomic-embed-text")
@@ -134,7 +151,7 @@ try {
   Assert-DatabaseSchema "flowyn"
 
   Write-Host "Applying migrations to a temporary clean database..."
-  $temporaryDatabase = "flowyn_milestone5_verify"
+  $temporaryDatabase = "flowyn_milestone6_verify"
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "postgres", "dropdb", "--if-exists", "-U", "flowyn", $temporaryDatabase)
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "postgres", "createdb", "-U", "flowyn", $temporaryDatabase)
   try {
@@ -152,18 +169,29 @@ try {
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/ollama-embedding.integration.test.ts", "tests/knowledge.integration.test.ts")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/agent.integration.test.ts")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/agent-ollama.integration.test.ts")
+  $env:RUN_WORKFLOW_INTEGRATION = "1"
+  $env:RUN_WORKFLOW_OLLAMA_INTEGRATION = "1"
+  Write-Host "Running durable workflow and workflow/Ollama integrations sequentially..."
+  Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/workflow.integration.test.ts")
+  Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/workflow-ollama.integration.test.ts")
   Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue
   Remove-Item Env:RUN_AGENT_INTEGRATION -ErrorAction SilentlyContinue
+  Remove-Item Env:RUN_WORKFLOW_INTEGRATION -ErrorAction SilentlyContinue
+  Remove-Item Env:RUN_WORKFLOW_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue
   Invoke-RequiredCommand $npmCommand @("run", "typecheck")
   Invoke-RequiredCommand $npmCommand @("run", "lint")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run")
   Invoke-RequiredCommand $npmCommand @("run", "build")
 
-  Write-Host "Milestone 5 local verification passed."
+  Write-Host "Milestone 6 local verification passed."
 } finally {
   if ($null -eq $previousRunOllamaIntegration) { Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue }
   else { $env:RUN_OLLAMA_INTEGRATION = $previousRunOllamaIntegration }
   if ($null -eq $previousRunAgentIntegration) { Remove-Item Env:RUN_AGENT_INTEGRATION -ErrorAction SilentlyContinue }
   else { $env:RUN_AGENT_INTEGRATION = $previousRunAgentIntegration }
+  if ($null -eq $previousRunWorkflowIntegration) { Remove-Item Env:RUN_WORKFLOW_INTEGRATION -ErrorAction SilentlyContinue }
+  else { $env:RUN_WORKFLOW_INTEGRATION = $previousRunWorkflowIntegration }
+  if ($null -eq $previousRunWorkflowOllamaIntegration) { Remove-Item Env:RUN_WORKFLOW_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue }
+  else { $env:RUN_WORKFLOW_OLLAMA_INTEGRATION = $previousRunWorkflowOllamaIntegration }
   Pop-Location
 }

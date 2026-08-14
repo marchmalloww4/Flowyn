@@ -26,6 +26,12 @@
 - Model observations are bounded, escaped, and delimited as untrusted prompt data. Persisted step rows contain only safe summaries; hidden reasoning and raw tool output are not requested or stored.
 - Agent execution has hard step, model-call, tool-call, total-time, observation, goal, and final-response bounds. Request aborts use `AbortSignal`; durable cross-request cancellation is intentionally deferred.
 
+Workflow definitions, request bodies, inputs, references, step configs, and idempotency keys are strict and bounded. Reference paths reject __proto__, prototype, and constructor. Workflow access is workspace-scoped: members may cancel only runs they started, while admins and owners may cancel any cancellable run in their workspace.
+
+Workflow versions and run snapshots are immutable. External agent and brand IDs are re-resolved at execution and must still belong to the workspace; disabled or deleted agents cannot run. Workflow execution uses a static server registry and cannot invoke eval, Function, dynamic modules, shell, arbitrary SQL, filesystem access, arbitrary HTTP, browser automation, or user-selected tools.
+
+Durable workflow output is schema-controlled JSON separate from safe observability metadata. History excludes chain-of-thought, raw observations, credentials, and unrestricted tool data. PostgreSQL execution tokens and leases guard every step and run transition; stale recovery creates a new attempt and prevents an old worker from completing after lease loss.
+
 ## Credential handling
 
 Never commit `.env.local`, database passwords, or provider secrets. The Compose defaults are development-only values. Replace `BETTER_AUTH_SECRET` before using a shared development machine.

@@ -45,6 +45,8 @@ Important variables:
 | `AGENT_MAX_OBSERVATION_CHARS` | Maximum tool observations carried into prompts | `6000` |
 | `AGENT_MAX_FINAL_RESPONSE_CHARS` | Maximum persisted agent response length | `8000` |
 
+Milestone 6 workflow limits are WORKFLOW_MAX_STEPS 20, WORKFLOW_TOTAL_TIMEOUT_MS 300000, WORKFLOW_STEP_TIMEOUT_MS 60000, WORKFLOW_MAX_RETRIES 2, WORKFLOW_MAX_INPUT_CHARS 12000, WORKFLOW_MAX_OUTPUT_CHARS 16000, WORKFLOW_MAX_CONTEXT_CHARS 24000, WORKFLOW_DISPATCH_LEASE_MS 30000, WORKFLOW_EXECUTION_LEASE_MS 90000, and WORKFLOW_WORKER_CONCURRENCY 1. These values bound inputs, context, attempts, execution time, leases, and worker concurrency.
+
 ## Start the local services
 
 ```powershell
@@ -95,6 +97,8 @@ The dashboard Agents panel manages workspace-owned definitions and lets members 
 
 `scripts/verify-local.ps1` also performs a live 768-dimensional finite-vector probe and runs the guarded Ollama/pgvector/RAG/agent integration tests with `RUN_OLLAMA_INTEGRATION=1`. These checks require the existing Docker services and database migration to be available; they do not reset volumes.
 
+The dashboard Workflows panel accepts a strict JSON definition and creates immutable versions. Runs are queued through a PostgreSQL outbox and BullMQ, then executed by the worker. Supported steps are SET_VALUE, TRANSFORM, CONDITION, AI_GENERATE, and AGENT. Definitions have one reachable entry graph with no cycles. Run history contains durable bounded output and safe metadata, not hidden reasoning or raw model/tool observations. Workflow execution is at-least-once: leases recover stale workers, and deterministic job identity prevents duplicate logical runs.
+
 ## Health checks
 
 ```powershell
@@ -108,6 +112,11 @@ Invoke-RestMethod http://localhost:11434/api/tags
 
 `/api/health/ollama` reports `MODEL_MISSING` until the configured model has been pulled. `/api/ai/health` uses the same readiness rule.
 
+The worker is independently startable and health is based on a Redis heartbeat rather than process existence:
+
+docker compose ps worker
+docker compose exec worker npm run worker:health
+
 ## Automated verification
 
 ```powershell
@@ -115,6 +124,8 @@ Invoke-RestMethod http://localhost:11434/api/tags
 ```
 
 The script validates Compose, starts services, waits for app and dependency health, runs migrations, and executes TypeScript, lint, tests, and build checks. It never installs software automatically. If Docker is not installed, it exits with a clear prerequisite error.
+
+The full local verification script also checks workflow tables, constraints, leases, outbox fields, worker heartbeat, clean migrations, BullMQ execution, immutable snapshots, and workflow/Ollama integration. It never resets databases or deletes Docker volumes.
 
 ## Troubleshooting
 

@@ -17,12 +17,17 @@ export type WorkspaceAction =
   | "agent.read"
   | "agent.run"
   | "agent.write"
-  | "agent.delete";
+  | "agent.delete"
+  | "workflow.read"
+  | "workflow.run"
+  | "workflow.write"
+  | "workflow.delete"
+  | "workflow.cancel";
 
 export function canPerformWorkspaceAction(role: WorkspaceRole, action: WorkspaceAction): boolean {
   if (role === "OWNER") return true;
-  if (role === "ADMIN") return ["workspace.read", "workspace.update", "membership.manage", "brand.read", "brand.write", "brand.delete", "agent.read", "agent.run", "agent.write", "agent.delete"].includes(action);
-  return ["workspace.read", "brand.read", "agent.read", "agent.run"].includes(action);
+  if (role === "ADMIN") return ["workspace.read", "workspace.update", "membership.manage", "brand.read", "brand.write", "brand.delete", "agent.read", "agent.run", "agent.write", "agent.delete", "workflow.read", "workflow.run", "workflow.write", "workflow.delete", "workflow.cancel"].includes(action);
+  return ["workspace.read", "brand.read", "agent.read", "agent.run", "workflow.read", "workflow.run", "workflow.cancel"].includes(action);
 }
 
 function normalizeRole(role: string): WorkspaceRole {

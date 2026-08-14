@@ -36,6 +36,20 @@
       "when": 1786672219295,
       "tag": "0004_high_lady_mastermind",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786679528120,
+      "tag": "0005_sudden_sally_floyd",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786680926750,
+      "tag": "0006_smooth_the_renegades",
+      "breakpoints": true
     }
   ]
 }

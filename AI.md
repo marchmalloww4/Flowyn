@@ -90,6 +90,12 @@ RAG is opt-in through `useBrandContext: true`. The prompt separates trusted stru
 
 The local verification flow makes a real embedding request, asserts the verified 768-dimensional finite vector, then runs guarded pgvector retrieval and RAG generation checks against the existing services.
 
-## Milestone 5 limitations
+## Milestone 6 workflow execution
 
-There is no external file import, agent memory, critic, multi-agent orchestration, visual workflow canvas, workflow node execution, queue, scheduling, webhook, approval, integration, billing, durable cancellation, or editor surface in this milestone. Knowledge input is manual text, indexing is synchronous, and agent runs are synchronous.
+AI_GENERATE resolves a bounded workflow expression into a prompt, calls prepareGeneration and generateText through LLMProvider, and propagates the workflow AbortSignal. AGENT resolves the current workspace-owned agent through the existing AgentRunner and persists only its subordinate AgentRun ID plus a workflow-owned bounded final output.
+
+Workflow AI outputs are durable values, not merely audit metadata. Model name, duration, output length, and safe error codes are stored separately. Prompts, raw responses beyond the bounded output, hidden reasoning, tool observations, and credentials are not persisted in workflow history. Provider and Agent failures default to non-retryable; timeouts are not automatically retried.
+
+## Milestone 6 limitations
+
+There is no external file import, agent memory, critic, multi-agent orchestration, visual workflow canvas, scheduling, webhook, approval, integration, or billing in this milestone. Knowledge input is manual text, workflow graphs are bounded and cycle-free, and external triggers are deferred.

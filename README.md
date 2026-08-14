@@ -2,7 +2,7 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1, 2, 3, 4, and 5**:
+This repository currently contains **Milestones 1, 2, 3, 4, 5, and 6**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -15,9 +15,10 @@ This repository currently contains **Milestones 1, 2, 3, 4, and 5**:
 - Redis and Ollama provisioned through Docker Compose.
 - A provider-abstracted Ollama health and generation API.
 - Controlled synchronous agents with soft-deleted definitions, bounded decisions, trusted runtime context, an allowlisted tool registry, safe run history, and request cancellation propagation.
+- Durable versioned workflows with bounded JSON graph steps, PostgreSQL snapshots and outbox delivery, BullMQ execution, leases, stale-worker protection, durable cancellation, and safe run history.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, Ollama behavior, agent policy, runner boundaries, protected APIs, and safe persistence.
 
-Workflow execution, queues, scheduling, webhooks, approvals, integrations, billing, visual workflow editing, and durable cross-request cancellation are intentionally not implemented yet. Milestone 6 is the next planned boundary.
+Scheduling, webhooks, approvals, integrations, billing, visual canvas editing, and general DAG or loop orchestration remain outside Milestone 6 and are intentionally deferred.
 
 ## Quick start
 
@@ -45,6 +46,8 @@ Workspace, brand, agent, and run APIs are protected by the authenticated session
 
 For full setup and troubleshooting, see [SETUP.md](SETUP.md). For architecture decisions, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
+The Compose worker service is independently startable and consumes durable workflow jobs. It uses the same application image, a separate BullMQ Redis connection, and a Redis heartbeat checked by npm run worker:health.
+
 ## Verification
 
 Run the local static checks:
@@ -64,6 +67,8 @@ When Docker Desktop is installed, run the complete local verification script:
 
 The health endpoints are:
 
+Workflow endpoints are /api/workflows, /api/workflows/:id/runs, /api/workflow-runs/:id, and /api/workflow-runs/:id/cancel.
+
 - `/api/health`
 - `/api/health/postgres`
 - `/api/health/redis`
@@ -73,6 +78,8 @@ The health endpoints are:
 - `/api/knowledge/retrieve`
 - `/api/agents?workspaceId=...`
 - `/api/agent-runs/:id`
+
+Milestone 6 adds lib/workflows for immutable definitions, graph validation, queue/outbox dispatch, executors, leases, and worker lifecycle, plus lib/queue for BullMQ Redis connections. Docker Compose now includes app and worker services.
 
 ## Project structure
 
@@ -90,7 +97,7 @@ lib/agents/          Bounded runner, trusted tool registry, agent service, and s
 db/migrations/       Generated PostgreSQL migrations
 tests/               Vitest tests
 scripts/             Local verification helpers
-docker-compose.yml   Local PostgreSQL, Redis, Ollama, and app services
+docker-compose.yml   Local PostgreSQL, Redis, Ollama, app, and worker services
 ```
 
 ## License

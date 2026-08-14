@@ -1,6 +1,6 @@
 # Architecture
 
-## Milestone 5 boundary
+## Milestone 6 boundary
 
 Flowyn is intentionally a modular monolith. Milestones 1 through 4 establish the runtime, authentication, tenant boundary, role-aware membership management, brand foundation, audit trail, provider-agnostic local AI, verified local embeddings, pgvector knowledge, and bounded RAG—not the eventual automation engine.
 
@@ -55,13 +55,25 @@ graph TD
 
 Business logic belongs in these modules, not in React components.
 
+## Durable workflow execution
+
+Workflow definitions are bounded JSON graphs with one entry step, reachable nodes, forward references only, and no cycles. Supported steps are SET_VALUE, TRANSFORM, CONDITION, AI_GENERATE, and AGENT. The executor registry is static and does not load code or tools from workflow JSON.
+
+Workflow edits validate the complete candidate definition, append an immutable workflow_versions row, and update the workflow current-version fields in one transaction. Every queued run copies the selected version into definitionSnapshot, so later edits cannot change a queued run.
+
+Run creation inserts workflow_runs and workflow_run_dispatches in one PostgreSQL transaction. The reusable outbox dispatcher claims pending, failed, or stale claimed rows with a lease, then enqueues a deterministic job. BullMQ 6 rejects colons in custom IDs, so the logical identity workflow-run:<runId> maps to the deterministic BullMQ-safe ID workflow-run-<runId>; the job payload contains only runId.
+
+The worker claims queued or stale running runs with a random execution token and lease. Heartbeats renew the lease. Every step attempt and run transition requires the current token and an unexpired lease; stale recovery interrupts old attempts and creates a new attempt. This is at-least-once execution and does not claim exactly-once side effects.
+
+Durable outputs are bounded JSON values stored separately from safe metadata. Metadata contains only operational facts such as operation, counts, model name, duration, and error code. Hidden reasoning, raw observations, credentials, unrestricted tool output, dynamic code, shell, arbitrary SQL, filesystem, HTTP, and browser execution are out of scope.
+
 ## Tenant isolation
 
 A workspace is the authorization boundary. Every brand query first resolves the brand’s workspace, then checks membership for the authenticated user. A client-provided resource ID is never sufficient for access. Unauthorized workspace resources return 404 to avoid exposing their existence.
 
 ## Data model
 
-Milestone 5 includes Better Auth tables plus:
+Milestone 6 includes Better Auth tables plus:
 
 - `workspaces` and `workspace_members`.
 - `brands`, `brand_voice_profiles`, `brand_rules`, and `brand_examples`.

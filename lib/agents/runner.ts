@@ -17,6 +17,7 @@ export interface RunAgentInput {
   registry?: ToolRegistry;
   db?: Database;
   abortSignal?: AbortSignal;
+  onRunCreated?: (run: AgentRun) => Promise<void>;
 }
 
 export interface AgentRunnerResult {
@@ -145,6 +146,7 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult>
   const db = input.db ?? createDatabaseFacade(getDatabase());
   const parsedGoal = agentRunSchema.parse({ goal: input.goal });
   const started = await startAgentRun(input.userId, input.agentId, parsedGoal.goal, db);
+  await input.onRunCreated?.(started.run);
   const provider = input.provider ?? getAIProvider();
   const registry = input.registry ?? createDefaultToolRegistry();
   const rootController = new AbortController();

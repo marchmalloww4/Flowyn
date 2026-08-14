@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type { WorkspaceRole } from "@/lib/workspaces/roles";
 import { embeddingVector } from "@/lib/database/vector";
+import type { JsonValue, WorkflowDefinition } from "@/lib/workflows/types";
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -237,6 +238,114 @@ export const agentRunSteps = pgTable("agent_run_steps", {
   statusCheck: check("agent_run_steps_status_check", sql`${table.status} in ('RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')`),
 }));
 
+export type WorkflowStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCEL_REQUESTED" | "CANCELLED" | "TIMED_OUT";
+export type WorkflowStepRunStatus = "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "INTERRUPTED";
+export type WorkflowDispatchStatus = "PENDING" | "CLAIMED" | "DISPATCHED" | "FAILED";
+
+export const workflows = pgTable("workflows", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  enabled: boolean("enabled").notNull().default(false),
+  currentVersion: integer("current_version").notNull().default(1),
+  currentVersionId: uuid("current_version_id"),
+  createdBy: text("created_by").notNull().references(() => user.id),
+  ...timestamps,
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+}, (table) => ({
+  workspaceIdx: index("workflows_workspace_idx").on(table.workspaceId),
+  workspaceEnabledIdx: index("workflows_workspace_enabled_idx").on(table.workspaceId, table.enabled),
+  currentVersionCheck: check("workflows_current_version_check", sql`${table.currentVersion} > 0`),
+}));
+
+export const workflowVersions = pgTable("workflow_versions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workflowId: uuid("workflow_id").notNull().references(() => workflows.id, { onDelete: "cascade" }),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  version: integer("version").notNull(),
+  definition: jsonb("definition").$type<WorkflowDefinition>().notNull(),
+  definitionHash: text("definition_hash").notNull(),
+  createdBy: text("created_by").notNull().references(() => user.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  workflowVersionIdx: uniqueIndex("workflow_versions_workflow_version_idx").on(table.workflowId, table.version),
+  workspaceIdx: index("workflow_versions_workspace_idx").on(table.workspaceId),
+  versionCheck: check("workflow_versions_version_check", sql`${table.version} > 0`),
+}));
+
+export const workflowRuns = pgTable("workflow_runs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  workflowId: uuid("workflow_id").notNull().references(() => workflows.id, { onDelete: "cascade" }),
+  workflowVersion: integer("workflow_version").notNull(),
+  workflowVersionId: uuid("workflow_version_id").notNull().references(() => workflowVersions.id),
+  definitionSnapshot: jsonb("definition_snapshot").$type<WorkflowDefinition>().notNull(),
+  status: text("status").$type<WorkflowStatus>().notNull().default("QUEUED"),
+  startedBy: text("started_by").references(() => user.id, { onDelete: "set null" }),
+  input: jsonb("input").$type<JsonValue>().notNull(),
+  output: jsonb("output").$type<JsonValue>(),
+  currentStepId: text("current_step_id"),
+  idempotencyKey: text("idempotency_key"),
+  executionToken: text("execution_token"),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
+  errorCode: text("error_code"),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  ...timestamps,
+}, (table) => ({
+  workspaceCreatedIdx: index("workflow_runs_workspace_created_idx").on(table.workspaceId, table.createdAt),
+  workflowIdx: index("workflow_runs_workflow_idx").on(table.workflowId),
+  statusIdx: index("workflow_runs_status_idx").on(table.workspaceId, table.status),
+  idempotencyIdx: uniqueIndex("workflow_runs_workspace_idempotency_idx").on(table.workspaceId, table.idempotencyKey),
+  statusCheck: check("workflow_runs_status_check", sql`${table.status} in ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCEL_REQUESTED', 'CANCELLED', 'TIMED_OUT')`),
+  versionCheck: check("workflow_runs_version_check", sql`${table.workflowVersion} > 0`),
+}));
+
+export const workflowStepRuns = pgTable("workflow_step_runs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workflowRunId: uuid("workflow_run_id").notNull().references(() => workflowRuns.id, { onDelete: "cascade" }),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  stepId: text("step_id").notNull(),
+  stepType: text("step_type").notNull(),
+  attempt: integer("attempt").notNull(),
+    status: text("status").$type<WorkflowStepRunStatus>().notNull(),
+    executionToken: text("execution_token").notNull(),
+  safeInput: jsonb("safe_input").$type<JsonValue>(),
+  safeOutput: jsonb("safe_output").$type<JsonValue>(),
+  safeMetadata: jsonb("safe_metadata").$type<Record<string, string | number | boolean | null>>().default({}).notNull(),
+  agentRunId: uuid("agent_run_id").references(() => agentRuns.id, { onDelete: "set null" }),
+  errorCode: text("error_code"),
+  startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  durationMs: integer("duration_ms"),
+}, (table) => ({
+  runIdx: index("workflow_step_runs_run_idx").on(table.workflowRunId, table.stepId),
+  attemptIdx: uniqueIndex("workflow_step_runs_attempt_idx").on(table.workflowRunId, table.stepId, table.attempt),
+  workspaceIdx: index("workflow_step_runs_workspace_idx").on(table.workspaceId),
+  statusCheck: check("workflow_step_runs_status_check", sql`${table.status} in ('RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'INTERRUPTED')`),
+  stepTypeCheck: check("workflow_step_runs_step_type_check", sql`${table.stepType} in ('SET_VALUE', 'TRANSFORM', 'CONDITION', 'AI_GENERATE', 'AGENT')`),
+  attemptCheck: check("workflow_step_runs_attempt_check", sql`${table.attempt} > 0`),
+}));
+
+export const workflowRunDispatches = pgTable("workflow_run_dispatches", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  runId: uuid("run_id").notNull().unique().references(() => workflowRuns.id, { onDelete: "cascade" }),
+  status: text("status").$type<WorkflowDispatchStatus>().notNull().default("PENDING"),
+  attempts: integer("attempts").notNull().default(0),
+  dispatcherId: text("dispatcher_id"),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  statusIdx: index("workflow_run_dispatches_status_idx").on(table.status, table.leaseExpiresAt),
+  statusCheck: check("workflow_run_dispatches_status_check", sql`${table.status} in ('PENDING', 'CLAIMED', 'DISPATCHED', 'FAILED')`),
+  attemptsCheck: check("workflow_run_dispatches_attempts_check", sql`${table.attempts} >= 0`),
+}));
+
 export type KnowledgeIndexStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
 
 export const knowledgeDocuments = pgTable("knowledge_documents", {
@@ -292,6 +401,10 @@ export const workspaceRelations = relations(workspaces, ({ many }) => ({
   agents: many(agents),
   agentRuns: many(agentRuns),
   agentRunSteps: many(agentRunSteps),
+  workflows: many(workflows),
+  workflowVersions: many(workflowVersions),
+  workflowRuns: many(workflowRuns),
+  workflowStepRuns: many(workflowStepRuns),
 }));
 
 export const brandRelations = relations(brands, ({ one, many }) => ({
@@ -323,6 +436,39 @@ export const agentRunStepRelations = relations(agentRunSteps, ({ one }) => ({
   workspace: one(workspaces, { fields: [agentRunSteps.workspaceId], references: [workspaces.id] }),
 }));
 
+export const workflowRelations = relations(workflows, ({ one, many }) => ({
+  workspace: one(workspaces, { fields: [workflows.workspaceId], references: [workspaces.id] }),
+  creator: one(user, { fields: [workflows.createdBy], references: [user.id] }),
+  versions: many(workflowVersions),
+  runs: many(workflowRuns),
+}));
+
+export const workflowVersionRelations = relations(workflowVersions, ({ one, many }) => ({
+  workflow: one(workflows, { fields: [workflowVersions.workflowId], references: [workflows.id] }),
+  workspace: one(workspaces, { fields: [workflowVersions.workspaceId], references: [workspaces.id] }),
+  creator: one(user, { fields: [workflowVersions.createdBy], references: [user.id] }),
+  runs: many(workflowRuns),
+}));
+
+export const workflowRunRelations = relations(workflowRuns, ({ one, many }) => ({
+  workflow: one(workflows, { fields: [workflowRuns.workflowId], references: [workflows.id] }),
+  version: one(workflowVersions, { fields: [workflowRuns.workflowVersionId], references: [workflowVersions.id] }),
+  workspace: one(workspaces, { fields: [workflowRuns.workspaceId], references: [workspaces.id] }),
+  starter: one(user, { fields: [workflowRuns.startedBy], references: [user.id] }),
+  steps: many(workflowStepRuns),
+  dispatch: one(workflowRunDispatches),
+}));
+
+export const workflowStepRunRelations = relations(workflowStepRuns, ({ one }) => ({
+  run: one(workflowRuns, { fields: [workflowStepRuns.workflowRunId], references: [workflowRuns.id] }),
+  workspace: one(workspaces, { fields: [workflowStepRuns.workspaceId], references: [workspaces.id] }),
+  agentRun: one(agentRuns, { fields: [workflowStepRuns.agentRunId], references: [agentRuns.id] }),
+}));
+
+export const workflowRunDispatchRelations = relations(workflowRunDispatches, ({ one }) => ({
+  run: one(workflowRuns, { fields: [workflowRunDispatches.runId], references: [workflowRuns.id] }),
+}));
+
 export const knowledgeDocumentRelations = relations(knowledgeDocuments, ({ one, many }) => ({
   workspace: one(workspaces, { fields: [knowledgeDocuments.workspaceId], references: [workspaces.id] }),
   brand: one(brands, { fields: [knowledgeDocuments.brandId], references: [brands.id] }),
@@ -351,6 +497,11 @@ export const schema = {
   agents,
   agentRuns,
   agentRunSteps,
+  workflows,
+  workflowVersions,
+  workflowRuns,
+  workflowStepRuns,
+  workflowRunDispatches,
   knowledgeDocuments,
   knowledgeChunks,
 };

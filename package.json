@@ -13,11 +13,14 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx lib/database/migrate.ts",
     "db:push": "drizzle-kit push",
-    "db:seed": "tsx lib/database/seed.ts"
+    "db:seed": "tsx lib/database/seed.ts",
+    "worker": "tsx worker/workflow-worker.ts",
+    "worker:health": "tsx scripts/check-worker-health.ts"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.3",
     "better-auth": "^1.3.7",
+    "bullmq": "^6.1.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",

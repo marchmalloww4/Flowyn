@@ -19,6 +19,7 @@ export interface GenerationRequest {
   temperature?: number;
   maxTokens?: number;
   useBrandContext?: boolean;
+  abortSignal?: AbortSignal;
 }
 
 export interface PreparedGeneration {
@@ -66,6 +67,7 @@ export async function prepareGeneration(input: GenerationRequest, provider: LLMP
       system: built.system || undefined,
       temperature: input.temperature ?? config.temperature,
       maxTokens: input.maxTokens ?? config.maxOutputTokens,
+      signal: input.abortSignal,
     },
     config,
     workspaceId: input.workspaceId,

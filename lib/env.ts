@@ -27,6 +27,16 @@ const envSchema = z.object({
   AGENT_MAX_GOAL_CHARS: z.coerce.number().int().positive().max(100000).default(4000),
   AGENT_MAX_OBSERVATION_CHARS: z.coerce.number().int().positive().max(100000).default(6000),
   AGENT_MAX_FINAL_RESPONSE_CHARS: z.coerce.number().int().positive().max(100000).default(8000),
+  WORKFLOW_MAX_STEPS: z.coerce.number().int().positive().max(100).default(20),
+  WORKFLOW_TOTAL_TIMEOUT_MS: z.coerce.number().int().positive().max(900000).default(300000),
+  WORKFLOW_STEP_TIMEOUT_MS: z.coerce.number().int().positive().max(300000).default(60000),
+  WORKFLOW_MAX_RETRIES: z.coerce.number().int().nonnegative().max(5).default(2),
+  WORKFLOW_MAX_INPUT_CHARS: z.coerce.number().int().positive().max(100000).default(12000),
+  WORKFLOW_MAX_OUTPUT_CHARS: z.coerce.number().int().positive().max(100000).default(16000),
+  WORKFLOW_MAX_CONTEXT_CHARS: z.coerce.number().int().positive().max(200000).default(24000),
+  WORKFLOW_DISPATCH_LEASE_MS: z.coerce.number().int().positive().max(300000).default(30000),
+  WORKFLOW_EXECUTION_LEASE_MS: z.coerce.number().int().positive().max(600000).default(90000),
+  WORKFLOW_WORKER_CONCURRENCY: z.coerce.number().int().positive().max(32).default(1),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
