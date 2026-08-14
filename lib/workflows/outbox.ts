@@ -10,7 +10,7 @@ export interface WorkflowDispatchResult {
 
 export interface WorkflowDispatchOptions {
   db?: Database;
-  enqueue?: (runId: string) => Promise<void>;
+  enqueue?: (runId: string, generation?: number) => Promise<void>;
   dispatcherId?: string;
   limit?: number;
   now?: Date;
@@ -56,7 +56,8 @@ export async function dispatchPendingWorkflowRuns(options: WorkflowDispatchOptio
     if (!claimed) continue;
 
     try {
-      await enqueue(candidate.runId);
+      if ((candidate.dispatchGeneration ?? 0) === 0) await enqueue(candidate.runId);
+      else await enqueue(candidate.runId, candidate.dispatchGeneration);
       await db.update(workflowRunDispatches).set({ status: "DISPATCHED", leaseExpiresAt: null, dispatchedAt: now, lastError: null, updatedAt: new Date() }).where(and(eq(workflowRunDispatches.id, candidate.id), eq(workflowRunDispatches.status, "CLAIMED"), eq(workflowRunDispatches.dispatcherId, dispatcherId)));
       dispatched += 1;
     } catch (error) {

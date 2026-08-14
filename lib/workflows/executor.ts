@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import type { JsonValue, WorkflowStep } from "@/lib/workflows/types";
 import type { LLMProvider } from "@/lib/ai/types";
 import { userExecutionPrincipal } from "@/lib/security/principal";
+import { pauseWorkflowForApproval } from "@/lib/workflows/approval-service";
 
 export interface ExecuteWorkflowRunOptions {
   runId: string;
@@ -136,6 +137,27 @@ export async function executeWorkflowRun(options: ExecuteWorkflowRunOptions): Pr
           if (cancellationRequested) throw new Error("WORKFLOW_CANCELLED");
           if (totalTimedOut) throw new Error("WORKFLOW_TIMEOUT");
           if (leaseLost) break;
+        }
+        if (stepResult.control?.type === "WAITING_APPROVAL") {
+          const paused = await pauseWorkflowForApproval({
+            runId: run.id,
+            workspaceId: run.workspaceId,
+            workflowId: run.workflowId,
+            workflowVersion: run.workflowVersion,
+            stepRunId: stepRun.id,
+            stepId: step.id,
+            stepName: step.name,
+            executionToken,
+            requiredRole: stepResult.control.requiredRole,
+            expiresAfterSeconds: stepResult.control.expiresAfterSeconds,
+            safeMetadata: stepResult.safeMetadata,
+            completedStepTypes: definition.steps.filter((candidate) => Object.prototype.hasOwnProperty.call(stepOutputs, candidate.id)).map((candidate) => candidate.type),
+          }, db);
+          if (!paused) {
+            leaseLost = true;
+            break;
+          }
+          return result(run.id, paused.run, stepCount, lastOutput, null);
         }
         const output = sanitizeWorkflowValue(stepResult.output);
         const advanced = await completeWorkflowStepAndAdvance({ runId: run.id, stepRunId: stepRun.id, executionToken, nextStepId: nextStepId(step, stepResult.nextStepId), output, safeMetadata: stepResult.safeMetadata, ...(stepResult.agentRunId === undefined ? {} : { agentRunId: stepResult.agentRunId }) }, db);

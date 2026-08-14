@@ -19,4 +19,12 @@ describe("workflow authorization policy", () => {
       expect(canPerformWorkspaceAction(role, "workflow.cancel")).toBe(true);
     }
   });
+
+  it("allows all members to read approvals but reserves decisions for admins and owners", () => {
+    expect(canPerformWorkspaceAction("MEMBER", "workflow_approval.read")).toBe(true);
+    expect(canPerformWorkspaceAction("MEMBER", "workflow_approval.decide")).toBe(false);
+    expect(canPerformWorkspaceAction("ADMIN", "workflow_approval.read")).toBe(true);
+    expect(canPerformWorkspaceAction("ADMIN", "workflow_approval.decide")).toBe(true);
+    expect(canPerformWorkspaceAction("OWNER", "workflow_approval.decide")).toBe(true);
+  });
 });

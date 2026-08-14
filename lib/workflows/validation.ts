@@ -139,6 +139,8 @@ export const workflowRunSchema = z.object({
 
 export const workflowListQuerySchema = z.object({ workspaceId: uuidSchema }).strict();
 export const workflowIdempotencyKeySchema = z.string().trim().min(1).max(120);
+export const workflowApprovalListQuerySchema = z.object({ workspaceId: uuidSchema }).strict();
+export const workflowApprovalDecisionSchema = z.object({ reason: z.string().trim().max(500).optional() }).strict();
 
 export type WorkflowDefinitionInput = z.infer<typeof workflowDefinitionSchema>;
 export type WorkflowStepInput = z.infer<typeof workflowStepSchema>;

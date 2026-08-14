@@ -123,7 +123,7 @@ The dashboard Agents panel manages workspace-owned definitions and lets members 
 
 scripts/verify-local.ps1 performs a live finite-vector probe, uses that verified dimension when checking PostgreSQL, and runs the guarded Ollama/pgvector/RAG/agent/workflow/scheduling integration tests. These checks require the existing Docker services and database migration to be available; they do not reset volumes.
 
-The dashboard Workflows panel accepts a strict JSON definition and creates immutable versions. Runs are queued through a PostgreSQL outbox and BullMQ, then executed by the worker. Supported steps are SET_VALUE, TRANSFORM, CONDITION, AI_GENERATE, and AGENT. Definitions have one reachable entry graph with no cycles. Run history contains durable bounded output and safe metadata, not hidden reasoning or raw model/tool observations. Workflow execution is at-least-once: leases recover stale workers, and deterministic job identity prevents duplicate logical runs.
+The dashboard Workflows panel accepts a strict JSON definition and creates immutable versions. Runs are queued through a PostgreSQL outbox and BullMQ, then executed by the worker. Supported steps are SET_VALUE, TRANSFORM, CONDITION, AI_GENERATE, AGENT, and APPROVAL. APPROVAL requires `requiredRole` OWNER or ADMIN and may specify `expiresAfterSeconds` from 60 through 31,536,000 seconds; an absent value waits indefinitely. The worker releases its lease while waiting. Approval resumes the same immutable snapshot through a generation-aware outbox continuation; rejection, expiration, and waiting cancellation are terminal.
 
 The dashboard Workflow schedules panel creates CRON, INTERVAL, and ONE_TIME schedules for existing workflows. Schedule state and occurrence history are stored in PostgreSQL; the scheduler service polls due rows, creates the existing durable workflow run/outbox records, and the worker executes them. Check the scheduler with docker compose exec scheduler npm run scheduler:health. Members can view schedules and history; admins and owners can mutate them.
 
@@ -163,6 +163,7 @@ The script validates Compose, starts services, waits for app and dependency heal
 The full local verification script also checks workflow tables, constraints, leases, outbox fields, worker heartbeat, clean migrations, BullMQ execution, immutable snapshots, and workflow/Ollama integration. It never resets databases or deletes Docker volumes.
 It additionally checks schedule tables, occurrence uniqueness, scheduler heartbeat, bounded one-time execution, and schedule-to-worker delivery.
 It also checks webhook tables, encrypted-secret projections, protocol bounds, public route deduplication, and the existing workflow outbox path without exposing credentials or raw delivery bodies.
+It also checks approval tables, role/status/expiry constraints, safe projections, manual/scheduled/webhook pause and resume, rejection, expiration, cancellation, role enforcement, decision races, idempotency, and continuation generation without rerunning completed steps.
 
 ## Troubleshooting
 

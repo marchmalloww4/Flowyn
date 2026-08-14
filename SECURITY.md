@@ -32,6 +32,14 @@ Workflow versions and run snapshots are immutable. External agent and brand IDs 
 
 Durable workflow output is schema-controlled JSON separate from safe observability metadata. History excludes chain-of-thought, raw observations, credentials, and unrestricted tool data. PostgreSQL execution tokens and leases guard every step and run transition; stale recovery creates a new attempt and prevents an old worker from completing after lease loss.
 
+## Human approval security
+
+- Approval policy is read only from the immutable workflow definition snapshot and copied into a workspace-scoped request. Client roles, workflow input, webhook payloads, AI output, RAG content, agent decisions, and automation principals cannot grant approval authority.
+- Better Auth and the centralized `workflow_approval.read`/`workflow_approval.decide` actions protect all approval routes. Members can read safe projections; the decision service re-checks the current membership and role inside the PostgreSQL decision transaction. OWNER is required for OWNER policy; ADMIN or OWNER satisfies ADMIN policy. Self-approval is intentionally allowed in M9.
+- PostgreSQL locks and conditional `PENDING` transitions make approval/rejection/expiration/cancellation races first-commit-wins. Repeated identical decisions are idempotent; opposite or late decisions receive safe conflicts. Approval output is exactly `{ "decision": "approved" }`.
+- Waiting releases worker execution tokens and leases. Approval continuation increments durable dispatch generation and reuses the existing outbox/BullMQ path. Duplicate jobs cannot rerun completed steps because PostgreSQL run claims and step state remain authoritative.
+- The inbox stores only bounded workflow/step names, IDs, version, role, origin kind, timestamps, and operational counts. It never stores or returns raw input, full webhook payloads, prompts, hidden reasoning, unrestricted observations, credentials, or secrets. Expiration uses bounded scheduler maintenance plus a lazy authoritative decision check.
+
 ## Scheduling security
 
 - Workflow schedules and occurrences are workspace-owned, validated server-side, and claimed with PostgreSQL row locks plus a unique schedule/instant constraint. Scheduler heartbeats are liveness metadata only; Redis is not schedule truth.
@@ -64,7 +72,7 @@ A resource ID is not an authorization decision. A protected service must:
 
 ## Deferred controls
 
-SSRF protection, encrypted integration credentials, CSRF policy review, file validation, safe expression evaluation, and approval gates belong to later milestones because those surfaces do not exist yet. They must be implemented before HTTP tools, uploads, or external integrations are enabled.
+SSRF protection, encrypted integration credentials, CSRF policy review, file validation, safe expression evaluation, outbound integrations, uploads, and external approval channels remain deferred. They must be implemented before HTTP tools, uploads, or external integrations are enabled.
 
 ## Local AI boundary
 

@@ -12,6 +12,7 @@ $previousRunWorkflowIntegration = $env:RUN_WORKFLOW_INTEGRATION
 $previousRunWorkflowOllamaIntegration = $env:RUN_WORKFLOW_OLLAMA_INTEGRATION
 $previousRunSchedulerIntegration = $env:RUN_SCHEDULER_INTEGRATION
 $previousRunWebhookIntegration = $env:RUN_WEBHOOK_INTEGRATION
+$previousRunApprovalIntegration = $env:RUN_APPROVAL_INTEGRATION
 
 $dockerCommand = (Get-Command docker -ErrorAction SilentlyContinue).Source
 if (-not $dockerCommand) {
@@ -54,6 +55,10 @@ SELECT 'webhook_tables=' || (to_regclass('public.workflow_webhook_triggers') IS 
 SELECT 'webhook_public_id_unique=' || (to_regclass('public.workflow_webhook_triggers_public_id_idx') IS NOT NULL);
 SELECT 'webhook_dedupe_unique=' || (to_regclass('public.workflow_webhook_events_trigger_dedupe_idx') IS NOT NULL);
 SELECT 'webhook_constraints=' || (EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_webhook_events_status_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_webhook_triggers_secret_version_check'));
+SELECT 'approval_tables=' || (to_regclass('public.workflow_approval_requests') IS NOT NULL);
+SELECT 'approval_unique=' || (to_regclass('public.workflow_approval_requests_run_step_idx') IS NOT NULL);
+SELECT 'approval_constraints=' || (EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_approval_requests_status_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_approval_requests_role_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_approval_requests_expiry_check'));
+SELECT 'approval_dispatch_generation=' || EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_run_dispatches' AND column_name = 'dispatch_generation');
 "@
   $output = & $dockerCommand compose exec -T postgres psql -U flowyn -d $DatabaseName -Atc $query
   if ($LASTEXITCODE -ne 0) { throw "PostgreSQL schema inspection failed for database $DatabaseName." }
@@ -85,7 +90,11 @@ SELECT 'webhook_constraints=' || (EXISTS (SELECT 1 FROM pg_constraint WHERE conn
     "webhook_tables=true",
     "webhook_public_id_unique=true",
     "webhook_dedupe_unique=true",
-    "webhook_constraints=true"
+    "webhook_constraints=true",
+    "approval_tables=true",
+    "approval_unique=true",
+    "approval_constraints=true",
+    "approval_dispatch_generation=true"
   )
   foreach ($expected in $required) {
     if ($checks -notcontains $expected) { throw "PostgreSQL schema check failed for ${DatabaseName}: expected $expected, got $($checks -join ', ')." }
@@ -171,7 +180,7 @@ try {
   Assert-DatabaseSchema "flowyn" $verifiedEmbeddingDimension
 
   Write-Host "Applying migrations to a temporary clean database..."
-  $temporaryDatabase = "flowyn_milestone8_verify"
+  $temporaryDatabase = "flowyn_milestone9_verify"
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "postgres", "dropdb", "--if-exists", "-U", "flowyn", $temporaryDatabase)
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "postgres", "createdb", "-U", "flowyn", $temporaryDatabase)
   try {
@@ -193,23 +202,26 @@ try {
   $env:RUN_WORKFLOW_OLLAMA_INTEGRATION = "1"
   $env:RUN_SCHEDULER_INTEGRATION = "1"
   $env:RUN_WEBHOOK_INTEGRATION = "1"
-  Write-Host "Running durable workflow, scheduler, and webhook integrations sequentially..."
+  $env:RUN_APPROVAL_INTEGRATION = "1"
+  Write-Host "Running durable workflow, scheduler, webhook, and approval integrations sequentially..."
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/workflow.integration.test.ts")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/workflow-ollama.integration.test.ts")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/scheduling.integration.test.ts")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/webhook.integration.test.ts")
+  Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/workflow-approval.integration.test.ts")
   Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue
   Remove-Item Env:RUN_AGENT_INTEGRATION -ErrorAction SilentlyContinue
   Remove-Item Env:RUN_WORKFLOW_INTEGRATION -ErrorAction SilentlyContinue
   Remove-Item Env:RUN_WORKFLOW_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue
   Remove-Item Env:RUN_SCHEDULER_INTEGRATION -ErrorAction SilentlyContinue
   Remove-Item Env:RUN_WEBHOOK_INTEGRATION -ErrorAction SilentlyContinue
+  Remove-Item Env:RUN_APPROVAL_INTEGRATION -ErrorAction SilentlyContinue
   Invoke-RequiredCommand $npmCommand @("run", "typecheck")
   Invoke-RequiredCommand $npmCommand @("run", "lint")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run")
   Invoke-RequiredCommand $npmCommand @("run", "build")
 
-  Write-Host "Milestone 8 local verification passed."
+  Write-Host "Milestone 9 local verification passed."
 } finally {
   if ($null -eq $previousRunOllamaIntegration) { Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue }
   else { $env:RUN_OLLAMA_INTEGRATION = $previousRunOllamaIntegration }
@@ -223,5 +235,7 @@ try {
   else { $env:RUN_SCHEDULER_INTEGRATION = $previousRunSchedulerIntegration }
   if ($null -eq $previousRunWebhookIntegration) { Remove-Item Env:RUN_WEBHOOK_INTEGRATION -ErrorAction SilentlyContinue }
   else { $env:RUN_WEBHOOK_INTEGRATION = $previousRunWebhookIntegration }
+  if ($null -eq $previousRunApprovalIntegration) { Remove-Item Env:RUN_APPROVAL_INTEGRATION -ErrorAction SilentlyContinue }
+  else { $env:RUN_APPROVAL_INTEGRATION = $previousRunApprovalIntegration }
   Pop-Location
 }

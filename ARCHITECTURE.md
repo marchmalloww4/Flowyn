@@ -65,7 +65,7 @@ Business logic belongs in these modules, not in React components.
 
 ## Durable workflow execution
 
-Workflow definitions are bounded JSON graphs with one entry step, reachable nodes, forward references only, and no cycles. Supported steps are SET_VALUE, TRANSFORM, CONDITION, AI_GENERATE, and AGENT. The executor registry is static and does not load code or tools from workflow JSON.
+Workflow definitions are bounded JSON graphs with one entry step, reachable nodes, forward references only, and no cycles. Supported steps are SET_VALUE, TRANSFORM, CONDITION, AI_GENERATE, AGENT, and APPROVAL. The executor registry is static and does not load code or tools from workflow JSON.
 
 Workflow edits validate the complete candidate definition, append an immutable workflow_versions row, and update the workflow current-version fields in one transaction. Every queued run copies the selected version into definitionSnapshot, so later edits cannot change a queued run.
 
@@ -158,6 +158,20 @@ Knowledge routes are protected by the same session and workspace boundary: `GET/
 Agent routes use the same session and workspace boundary: `GET/POST /api/agents`, `GET/PATCH/DELETE /api/agents/:id`, `POST /api/agents/:id/runs`, and `GET /api/agent-runs/:id`. Definitions are soft-deleted with `deletedAt`; disabled definitions remain manageable but reject new runs. The run endpoint is synchronous, accepts only a bounded goal, derives all workspace/user/brand/tool/policy context on the server, and returns a terminal result. History exposes only bounded final output and safe step metadata.
 
 The runner calls `LLMProvider.generateStructured()` with a strict tool-or-final decision schema. Its effective tools are configured names intersected with registered tools and tools valid for the trusted runtime brand context. Model observations are bounded and inserted only into delimited untrusted prompt sections; persisted steps store decision types, tool names, counts, durations, and safe error codes, never raw observations or hidden reasoning. Request aborts propagate through `AbortSignal`; durable cross-request cancellation is deferred.
+
+## Durable human approval gates
+
+Milestone 9 adds a static `APPROVAL` step to the existing workflow registry. Its policy is part of the immutable workflow definition snapshot: `requiredRole` is `OWNER` or `ADMIN`, and `expiresAfterSeconds` is optional with bounds of 60 through 31,536,000 seconds. The executor emits a control result; it never decides and never calls an external system.
+
+When the worker reaches the step, PostgreSQL atomically creates one workspace-scoped `workflow_approval_requests` row, marks the step and run `WAITING_APPROVAL`, and clears the execution lease. No BullMQ worker is held. Approval, rejection, expiration, and waiting cancellation lock the approval/run state and update the request, step, run, audit event, and—on approval—the existing outbox continuation in one transaction.
+
+Approval context is a bounded projection of historical names, run/version identifiers, origin kind, required role, timestamps, and operational counts. It excludes raw workflow input, webhook bodies, prompts, hidden reasoning, unrestricted tool output, credentials, and secrets. Workflow names and step names are copied into the request so historical inbox entries remain readable after soft deletion.
+
+The existing outbox row remains one row per run. Initial dispatch uses generation 0; approval increments the durable integer generation, resets the row to `PENDING`, and uses a BullMQ job identity containing run ID and generation. The job payload remains only the run ID. PostgreSQL claim/state transitions remain authoritative against duplicate delivery and crash recovery.
+
+Approval APIs use Better Auth, centralized workspace actions, and current membership roles. Members can read safe projections. Only an authenticated current ADMIN or OWNER satisfying the stored policy can decide; self-approval is allowed. Automation principals can reach the step but have no decision route or decision authority. The scheduler performs bounded expiration maintenance and lazy decision paths provide correctness when the scheduler is delayed.
+
+Milestone 9 introduces no outbound HTTP, OAuth, third-party credentials, public approval links, browser automation, file uploads, arbitrary execution, or new queue/service boundary.
 
 ## Extension points
 

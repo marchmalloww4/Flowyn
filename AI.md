@@ -106,6 +106,12 @@ The scheduler supports five-field CRON, bounded INTERVAL, and terminal ONE_TIME 
 
 Webhook-triggered AI and Agent steps use the same path. An authenticated webhook payload is bounded workflow input only; it cannot select a provider, model, endpoint, agent, tool, brand, workspace, or user. After PostgreSQL event/run/outbox commit, the existing worker resolves the webhook automation origin and invokes the static workflow registry. AI calls remain behind `LLMProvider`, RAG remains workspace/brand filtered, and agent calls remain behind the controlled AgentRunner.
 
+## Milestone 9 human approval gates
+
+The static `APPROVAL` workflow step is a human control boundary, not an AI capability. AI_GENERATE and AgentRunner can produce preceding bounded outputs, but neither can emit a decision or call the approval APIs. The executor returns a typed waiting control result; PostgreSQL creates the request and releases the worker lease.
+
+Approval context contains only safe operational projections. Raw prompts, model responses beyond existing bounded workflow output, RAG text, hidden reasoning, tool observations, webhook bodies, credentials, and secrets are not copied into the inbox. Approval resumes the existing immutable workflow snapshot through the same outbox/worker path; it does not re-run completed AI or agent steps. LLMProvider, BrandContext/RAG, static AgentRunner, and workspace automation principals remain unchanged and cannot bypass the human decision boundary.
+
 ## Milestone 7 limitations
 
-There is no external file import, agent memory, critic, multi-agent orchestration, visual workflow canvas, approval, outbound integration, OAuth, or billing in this milestone. Webhooks are limited to the inbound HMAC protocol documented in the project security documentation; outbound external actions remain deferred.
+There is no external file import, agent memory, critic, multi-agent orchestration, visual workflow canvas, outbound integration, OAuth, or billing in this milestone. Webhooks remain limited to the inbound HMAC protocol, and M9 approvals remain internal authenticated workspace decisions; outbound external actions and external approval channels remain deferred.

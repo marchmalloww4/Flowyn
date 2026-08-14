@@ -5,7 +5,7 @@ import { getAgent, getAgentForWorkspace } from "@/lib/agents/service";
 import { getBrand, getBrandForWorkspace } from "@/lib/brands/service";
 import { requireWorkspaceAction, requireWorkspaceMember } from "@/lib/authz/authorization";
 import { recordAuditEvent } from "@/lib/audit/service";
-import { getDatabase, type Database, workflowRunDispatches, workflowRuns, workflowScheduleOccurrences, workflowStepRuns, workflowVersions, workflowWebhookEvents, workflowWebhookTriggers, workflows } from "@/lib/database";
+import { getDatabase, type Database, workflowApprovalRequests, workflowRunDispatches, workflowRuns, workflowScheduleOccurrences, workflowStepRuns, workflowVersions, workflowWebhookEvents, workflowWebhookTriggers, workflows } from "@/lib/database";
 import { AppError } from "@/lib/security/errors";
 import { userExecutionPrincipal, webhookAutomationPrincipal, workspaceAutomationPrincipal, type ExecutionPrincipal, type WorkspaceAutomationPrincipal } from "@/lib/security/principal";
 import { validateWorkflowDefinition } from "@/lib/workflows/validation";
@@ -389,6 +389,23 @@ export async function cancelWorkflowRun(userId: string, runId: string, db: Datab
   if (!run) throw new AppError("WORKFLOW_NOT_FOUND", 404, "Workflow run not found.");
   const membership = await requireWorkspaceMember(userId, run.workspaceId, db);
   if (membership.role === "MEMBER" && run.startedBy !== userId) throw new AppError("WORKFLOW_CANCEL_FORBIDDEN", 403, "You cannot cancel this workflow run.");
+  if (run.status === "WAITING_APPROVAL") {
+    return db.transaction(async (tx) => {
+      const [pendingRequest] = await tx.select().from(workflowApprovalRequests).where(eq(workflowApprovalRequests.workflowRunId, run.id)).for("update").limit(1);
+      const [locked] = await tx.select().from(workflowRuns).where(eq(workflowRuns.id, run.id)).for("update").limit(1);
+      if (!locked || locked.status !== "WAITING_APPROVAL") return locked ?? run;
+      const [request] = pendingRequest?.status === "PENDING"
+        ? await tx.update(workflowApprovalRequests).set({ status: "CANCELLED", decidedAt: new Date(), decidedBy: userId, decisionReason: "WORKFLOW_CANCELLED" }).where(and(eq(workflowApprovalRequests.id, pendingRequest.id), eq(workflowApprovalRequests.status, "PENDING"))).returning()
+        : [];
+      const [cancelled] = await tx.update(workflowRuns).set({ status: "CANCELLED", errorCode: "WORKFLOW_CANCELLED", leaseExpiresAt: null, executionToken: null, completedAt: new Date(), updatedAt: new Date() }).where(and(eq(workflowRuns.id, locked.id), eq(workflowRuns.status, "WAITING_APPROVAL"))).returning();
+      if (request) {
+        await tx.update(workflowStepRuns).set({ status: "CANCELLED", errorCode: "WORKFLOW_CANCELLED", completedAt: new Date(), durationMs: 0 }).where(and(eq(workflowStepRuns.workflowRunId, locked.id), eq(workflowStepRuns.stepId, request.workflowStepId), eq(workflowStepRuns.status, "WAITING_APPROVAL")));
+        await recordAuditEvent({ workspaceId: locked.workspaceId, actorUserId: userId, action: "workflow_approval.cancelled", resourceType: "workflow_approval", resourceId: request.id, metadata: { workflowRunId: locked.id, workflowStepId: request.workflowStepId } }, tx);
+      }
+      await recordAuditEvent({ workspaceId: locked.workspaceId, actorUserId: userId, action: "workflow.run_cancelled", resourceType: "workflow_run", resourceId: locked.id, metadata: { previousStatus: locked.status } }, tx);
+      return cancelled ?? locked;
+    });
+  }
   if (!["QUEUED", "RUNNING"].includes(run.status)) return run;
   const [updated] = await db.update(workflowRuns).set({ status: "CANCEL_REQUESTED", cancelRequestedAt: new Date(), updatedAt: new Date() }).where(and(eq(workflowRuns.id, run.id), inArray(workflowRuns.status, ["QUEUED", "RUNNING"]))).returning();
   const result = updated ?? run;

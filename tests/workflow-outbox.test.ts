@@ -32,6 +32,7 @@ beforeEach(() => {
 describe("workflow outbox", () => {
   it("uses a deterministic BullMQ job ID", () => {
     expect(workflowJobId(runId)).toBe(`workflow-run:${runId}`);
+    expect(workflowJobId(runId, 1)).toBe(`workflow-run:${runId}:generation:1`);
   });
 
   it("claims and dispatches a pending run once", async () => {
@@ -64,5 +65,15 @@ describe("workflow outbox", () => {
 
     await expect(dispatchPendingWorkflowRuns({ db: db as never, dispatcherId: "dispatcher-a" })).resolves.toEqual({ dispatched: 0, failed: 1 });
     expect(enqueueWorkflowRun).toHaveBeenCalledWith(runId);
+  });
+
+  it("dispatches a continuation with its durable generation", async () => {
+    const db = database({
+      selectRows: [{ id: dispatchId, runId, status: "PENDING", attempts: 0, dispatchGeneration: 2, leaseExpiresAt: null }],
+      updateRows: [[{ id: dispatchId, runId, status: "CLAIMED", attempts: 1, dispatchGeneration: 2 }], [{ id: dispatchId, runId, status: "DISPATCHED", attempts: 1, dispatchGeneration: 2 }]],
+    });
+
+    await expect(dispatchPendingWorkflowRuns({ db: db as never, dispatcherId: "dispatcher-a" })).resolves.toEqual({ dispatched: 1, failed: 0 });
+    expect(enqueueWorkflowRun).toHaveBeenCalledWith(runId, 2);
   });
 });

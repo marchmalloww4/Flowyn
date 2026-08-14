@@ -2,7 +2,7 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1 through 8**:
+This repository currently contains **Milestones 1 through 9**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -18,9 +18,10 @@ This repository currently contains **Milestones 1 through 8**:
 - Durable versioned workflows with bounded JSON graph steps, PostgreSQL snapshots and outbox delivery, BullMQ execution, leases, stale-worker protection, durable cancellation, and safe run history.
 - Durable CRON, interval, and one-time workflow schedules with PostgreSQL occurrence uniqueness, bounded misfire handling, a dedicated scheduler process, Redis heartbeat health, and workspace-scoped schedule history.
 - Secure inbound workflow webhooks with encrypted rotatable secrets, HMAC/timestamp verification, Redis admission limits, PostgreSQL delivery deduplication, durable event/run/outbox transactions, safe delivery history, and a workspace-isolated management panel.
+- Durable human approval gates with a static APPROVAL workflow step, PostgreSQL-owned waiting/decision/expiration/cancellation state, protected workspace approval inbox APIs, safe bounded approval context, and generation-aware workflow continuation dispatch.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, Ollama behavior, agent policy, runner boundaries, protected APIs, and safe persistence.
 
-Approvals, outbound integrations, OAuth, billing, visual canvas editing, browser automation, file uploads, and general DAG or loop orchestration remain outside Milestone 8 and are intentionally deferred.
+Outbound integrations, OAuth, billing, visual canvas editing, browser automation, file uploads, and general DAG or loop orchestration remain outside Milestone 9 and are intentionally deferred.
 
 ## Quick start
 
@@ -53,6 +54,8 @@ The Compose worker service is independently startable and consumes durable workf
 Schedule APIs are available at `/api/workflow-schedules`, `/api/workflow-schedules/:id`, and `/api/workflow-schedules/:id/occurrences`; schedule mutation requires workspace ADMIN or OWNER access, while members can read schedules and history.
 
 Webhook management APIs are available at `/api/workflow-webhooks` and its resource, enable/disable, secret-rotation, and event-history routes. Public delivery uses `POST /api/hooks/:publicId` with the documented HMAC headers. Management mutation requires workspace ADMIN or OWNER access; members can read safe configuration and history. The public route never accepts workspace, user, workflow, role, principal, tool, model, endpoint, or execution choices from the sender.
+
+Approval APIs are available at `/api/workflow-approvals`, `/api/workflow-approvals/:id`, `/api/workflow-approvals/:id/approve`, and `/api/workflow-approvals/:id/reject`. Members can read safe approval projections; only currently authorized ADMIN or OWNER users can decide according to the immutable step policy. Automation principals, AI, agents, webhook callers, and workflow input cannot decide approvals.
 
 ## Verification
 
@@ -104,6 +107,7 @@ lib/knowledge/       Chunking, indexing, retrieval, and BrandContext services
 lib/agents/          Bounded runner, trusted tool registry, agent service, and safe run persistence
 lib/schedules/       Schedule validation/calculation, occurrence processing, scheduler runtime, and heartbeat
 lib/webhooks/        HMAC protocol, encrypted secrets, bounded ingress, deduplication, rate limiting, management, and safe history
+lib/workflows/       Immutable workflow definitions, static executors, durable runs/outbox, schedules, webhooks, and human approval gates
 db/migrations/       Generated PostgreSQL migrations
 tests/               Vitest tests
 scripts/             Local verification helpers
