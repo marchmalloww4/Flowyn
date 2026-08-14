@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type { WorkspaceRole } from "@/lib/workspaces/roles";
 import { embeddingVector } from "@/lib/database/vector";
-import type { JsonValue, WorkflowDefinition } from "@/lib/workflows/types";
+import type { JsonValue, WorkflowApprovalRole, WorkflowDefinition } from "@/lib/workflows/types";
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -238,9 +238,10 @@ export const agentRunSteps = pgTable("agent_run_steps", {
   statusCheck: check("agent_run_steps_status_check", sql`${table.status} in ('RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')`),
 }));
 
-export type WorkflowStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCEL_REQUESTED" | "CANCELLED" | "TIMED_OUT";
-export type WorkflowStepRunStatus = "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "INTERRUPTED";
+export type WorkflowStatus = "QUEUED" | "RUNNING" | "WAITING_APPROVAL" | "COMPLETED" | "FAILED" | "REJECTED" | "EXPIRED" | "CANCEL_REQUESTED" | "CANCELLED" | "TIMED_OUT";
+export type WorkflowStepRunStatus = "RUNNING" | "WAITING_APPROVAL" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "INTERRUPTED";
 export type WorkflowDispatchStatus = "PENDING" | "CLAIMED" | "DISPATCHED" | "FAILED";
+export type WorkflowApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CANCELLED";
 export type WorkflowScheduleType = "CRON" | "INTERVAL" | "ONE_TIME";
 export type WorkflowScheduleMisfirePolicy = "SKIP" | "FIRE_ONCE";
 export type WorkflowScheduleOccurrenceStatus = "TRIGGERED" | "SKIPPED" | "FAILED";
@@ -303,8 +304,35 @@ export const workflowRuns = pgTable("workflow_runs", {
   workflowIdx: index("workflow_runs_workflow_idx").on(table.workflowId),
   statusIdx: index("workflow_runs_status_idx").on(table.workspaceId, table.status),
   idempotencyIdx: uniqueIndex("workflow_runs_workspace_idempotency_idx").on(table.workspaceId, table.idempotencyKey),
-  statusCheck: check("workflow_runs_status_check", sql`${table.status} in ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCEL_REQUESTED', 'CANCELLED', 'TIMED_OUT')`),
+  workspaceRunUnique: uniqueIndex("workflow_runs_workspace_id_idx").on(table.workspaceId, table.id),
+  statusCheck: check("workflow_runs_status_check", sql`${table.status} in ('QUEUED', 'RUNNING', 'WAITING_APPROVAL', 'COMPLETED', 'FAILED', 'REJECTED', 'EXPIRED', 'CANCEL_REQUESTED', 'CANCELLED', 'TIMED_OUT')`),
   versionCheck: check("workflow_runs_version_check", sql`${table.workflowVersion} > 0`),
+}));
+
+export const workflowApprovalRequests = pgTable("workflow_approval_requests", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  workflowRunId: uuid("workflow_run_id").notNull().references(() => workflowRuns.id, { onDelete: "cascade" }),
+  workflowStepId: text("workflow_step_id").notNull(),
+  workflowName: text("workflow_name").notNull(),
+  workflowStepName: text("workflow_step_name").notNull(),
+  workflowVersion: integer("workflow_version").notNull(),
+  requiredRole: text("required_role").$type<WorkflowApprovalRole>().notNull(),
+  status: text("status").$type<WorkflowApprovalStatus>().notNull().default("PENDING"),
+  safeContext: jsonb("safe_context").$type<Record<string, JsonValue>>().notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  decidedBy: text("decided_by").references(() => user.id, { onDelete: "set null" }),
+  decisionReason: text("decision_reason"),
+}, (table) => ({
+  workspaceStatusIdx: index("workflow_approval_requests_workspace_status_idx").on(table.workspaceId, table.status, table.createdAt),
+  expiresIdx: index("workflow_approval_requests_expires_idx").on(table.expiresAt),
+  runStepIdx: uniqueIndex("workflow_approval_requests_run_step_idx").on(table.workflowRunId, table.workflowStepId),
+  roleCheck: check("workflow_approval_requests_role_check", sql`${table.requiredRole} in ('OWNER', 'ADMIN')`),
+  statusCheck: check("workflow_approval_requests_status_check", sql`${table.status} in ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED', 'CANCELLED')`),
+  versionCheck: check("workflow_approval_requests_version_check", sql`${table.workflowVersion} > 0`),
+  expiryCheck: check("workflow_approval_requests_expiry_check", sql`${table.expiresAt} is null or ${table.expiresAt} > ${table.createdAt}`),
 }));
 
 export const workflowSchedules = pgTable("workflow_schedules", {
@@ -428,14 +456,15 @@ export const workflowStepRuns = pgTable("workflow_step_runs", {
   runIdx: index("workflow_step_runs_run_idx").on(table.workflowRunId, table.stepId),
   attemptIdx: uniqueIndex("workflow_step_runs_attempt_idx").on(table.workflowRunId, table.stepId, table.attempt),
   workspaceIdx: index("workflow_step_runs_workspace_idx").on(table.workspaceId),
-  statusCheck: check("workflow_step_runs_status_check", sql`${table.status} in ('RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'INTERRUPTED')`),
-  stepTypeCheck: check("workflow_step_runs_step_type_check", sql`${table.stepType} in ('SET_VALUE', 'TRANSFORM', 'CONDITION', 'AI_GENERATE', 'AGENT')`),
+  statusCheck: check("workflow_step_runs_status_check", sql`${table.status} in ('RUNNING', 'WAITING_APPROVAL', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'INTERRUPTED')`),
+  stepTypeCheck: check("workflow_step_runs_step_type_check", sql`${table.stepType} in ('SET_VALUE', 'TRANSFORM', 'CONDITION', 'AI_GENERATE', 'AGENT', 'APPROVAL')`),
   attemptCheck: check("workflow_step_runs_attempt_check", sql`${table.attempt} > 0`),
 }));
 
 export const workflowRunDispatches = pgTable("workflow_run_dispatches", {
   id: uuid("id").defaultRandom().primaryKey(),
   runId: uuid("run_id").notNull().unique().references(() => workflowRuns.id, { onDelete: "cascade" }),
+  dispatchGeneration: integer("dispatch_generation").notNull().default(0),
   status: text("status").$type<WorkflowDispatchStatus>().notNull().default("PENDING"),
   attempts: integer("attempts").notNull().default(0),
   dispatcherId: text("dispatcher_id"),
@@ -448,6 +477,7 @@ export const workflowRunDispatches = pgTable("workflow_run_dispatches", {
   statusIdx: index("workflow_run_dispatches_status_idx").on(table.status, table.leaseExpiresAt),
   statusCheck: check("workflow_run_dispatches_status_check", sql`${table.status} in ('PENDING', 'CLAIMED', 'DISPATCHED', 'FAILED')`),
   attemptsCheck: check("workflow_run_dispatches_attempts_check", sql`${table.attempts} >= 0`),
+  dispatchGenerationCheck: check("workflow_run_dispatches_generation_check", sql`${table.dispatchGeneration} >= 0`),
 }));
 
 export type KnowledgeIndexStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
@@ -508,6 +538,7 @@ export const workspaceRelations = relations(workspaces, ({ many }) => ({
   workflows: many(workflows),
   workflowVersions: many(workflowVersions),
   workflowRuns: many(workflowRuns),
+  workflowApprovalRequests: many(workflowApprovalRequests),
   workflowStepRuns: many(workflowStepRuns),
   workflowSchedules: many(workflowSchedules),
   workflowScheduleOccurrences: many(workflowScheduleOccurrences),
@@ -566,6 +597,7 @@ export const workflowRunRelations = relations(workflowRuns, ({ one, many }) => (
   workspace: one(workspaces, { fields: [workflowRuns.workspaceId], references: [workspaces.id] }),
   starter: one(user, { fields: [workflowRuns.startedBy], references: [user.id] }),
   steps: many(workflowStepRuns),
+  approvalRequests: many(workflowApprovalRequests),
   dispatch: one(workflowRunDispatches),
   scheduleOccurrences: many(workflowScheduleOccurrences),
   webhookEvents: many(workflowWebhookEvents),
@@ -603,6 +635,12 @@ export const workflowStepRunRelations = relations(workflowStepRuns, ({ one }) =>
   agentRun: one(agentRuns, { fields: [workflowStepRuns.agentRunId], references: [agentRuns.id] }),
 }));
 
+export const workflowApprovalRequestRelations = relations(workflowApprovalRequests, ({ one }) => ({
+  workspace: one(workspaces, { fields: [workflowApprovalRequests.workspaceId], references: [workspaces.id] }),
+  run: one(workflowRuns, { fields: [workflowApprovalRequests.workflowRunId], references: [workflowRuns.id] }),
+  decider: one(user, { fields: [workflowApprovalRequests.decidedBy], references: [user.id] }),
+}));
+
 export const workflowRunDispatchRelations = relations(workflowRunDispatches, ({ one }) => ({
   run: one(workflowRuns, { fields: [workflowRunDispatches.runId], references: [workflowRuns.id] }),
 }));
@@ -638,6 +676,7 @@ export const schema = {
   workflows,
   workflowVersions,
   workflowRuns,
+  workflowApprovalRequests,
   workflowSchedules,
   workflowScheduleOccurrences,
   workflowWebhookTriggers,
