@@ -19,6 +19,12 @@
 - Structured AI output is parsed and validated with Zod before application use.
 - No shell execution, arbitrary code execution, or generic database tool is exposed to AI.
 - Docker services use named volumes and explicit healthchecks.
+- Agent definitions and runs are workspace-authorized; `agent.write`/`agent.delete` are restricted to admins/owners while members may read and run enabled definitions.
+- Agent DELETE is a soft delete (`deletedAt` plus `enabled = false`), preserving historical runs and steps.
+- Agent run bodies contain only a bounded goal. User, workspace, agent, brand, tool, policy, and abort context are derived server-side.
+- The effective tool set is the intersection of configured names, registered tools, and tools valid for the trusted runtime brand. No shell, filesystem, SQL, arbitrary HTTP, browser, dynamic code, or external integration tool is registered.
+- Model observations are bounded, escaped, and delimited as untrusted prompt data. Persisted step rows contain only safe summaries; hidden reasoning and raw tool output are not requested or stored.
+- Agent execution has hard step, model-call, tool-call, total-time, observation, goal, and final-response bounds. Request aborts use `AbortSignal`; durable cross-request cancellation is intentionally deferred.
 
 ## Credential handling
 

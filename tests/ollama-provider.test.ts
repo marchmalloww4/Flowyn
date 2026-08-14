@@ -40,4 +40,25 @@ describe("OllamaProvider", () => {
     await expect(result).rejects.toBeInstanceOf(AIProviderError);
     await expect(result).rejects.toMatchObject({ code: "MODEL_UNAVAILABLE" });
   });
+
+  it("observes a caller abort signal during generation", async () => {
+    const controller = new AbortController();
+    let requestStarted!: () => void;
+    const started = new Promise<void>((resolve) => { requestStarted = resolve; });
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/api/tags")) return tagsResponse();
+      requestStarted();
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      });
+    });
+    const provider = new OllamaProvider({ baseUrl: "http://ollama.test", fetcher, timeoutMs: 1000 });
+    const result = provider.generate({ prompt: "hello", signal: controller.signal });
+    await started;
+    const abortedAt = performance.now();
+    controller.abort();
+
+    await expect(result).rejects.toMatchObject({ code: "REQUEST_TIMEOUT" });
+    expect(performance.now() - abortedAt).toBeLessThan(500);
+  });
 });

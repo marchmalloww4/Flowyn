@@ -1,12 +1,15 @@
 import type { ZodType } from "zod";
 
+export type LLMJsonSchema = Record<string, unknown>;
+
 export interface LLMGenerateInput {
   prompt: string;
   system?: string;
   model?: string;
   temperature?: number;
   maxTokens?: number;
-  format?: "json";
+  format?: "json" | LLMJsonSchema;
+  signal?: AbortSignal;
 }
 
 export interface LLMResult {
@@ -24,6 +27,7 @@ export interface LLMHealthResult {
 
 export interface LLMStructuredInput<T> extends Omit<LLMGenerateInput, "format"> {
   schema: ZodType<T>;
+  format?: "json" | LLMJsonSchema;
 }
 
 export interface LLMStructuredResult<T> extends LLMResult {

@@ -2,7 +2,7 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1, 2, 3, and 4**:
+This repository currently contains **Milestones 1, 2, 3, 4, and 5**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -14,9 +14,10 @@ This repository currently contains **Milestones 1, 2, 3, and 4**:
 - Verified local `nomic-embed-text` embeddings, PostgreSQL pgvector knowledge chunks, deterministic indexing, semantic retrieval, bounded BrandContext, and optional RAG generation.
 - Redis and Ollama provisioned through Docker Compose.
 - A provider-abstracted Ollama health and generation API.
-- Vitest coverage for health probes, schema contracts, input validation, workspace isolation, and Ollama behavior.
+- Controlled synchronous agents with soft-deleted definitions, bounded decisions, trusted runtime context, an allowlisted tool registry, safe run history, and request cancellation propagation.
+- Vitest coverage for health probes, schema contracts, input validation, workspace isolation, Ollama behavior, agent policy, runner boundaries, protected APIs, and safe persistence.
 
-Workflow execution, agents, queues, scheduling, webhooks, approvals, integrations, billing, and the content editor are intentionally not implemented yet. Milestone 5 is the next planned boundary.
+Workflow execution, queues, scheduling, webhooks, approvals, integrations, billing, visual workflow editing, and durable cross-request cancellation are intentionally not implemented yet. Milestone 6 is the next planned boundary.
 
 ## Quick start
 
@@ -40,7 +41,7 @@ Workflow execution, agents, queues, scheduling, webhooks, approvals, integration
 7. Start the host app with `npm run dev`.
 8. Open [http://localhost:3000](http://localhost:3000).
 
-Workspace and membership APIs are protected by the authenticated session. All workspace-owned reads and writes verify server-side membership and role.
+Workspace, brand, agent, and run APIs are protected by the authenticated session. All workspace-owned reads and writes verify server-side membership and role. Agent runs are synchronous: `POST /api/agents/:id/runs` returns only after a terminal result, and cancellation is request-scoped rather than durable across requests.
 
 For full setup and troubleshooting, see [SETUP.md](SETUP.md). For architecture decisions, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -70,12 +71,14 @@ The health endpoints are:
 - `/api/ai/health`
 - `/api/knowledge`
 - `/api/knowledge/retrieve`
+- `/api/agents?workspaceId=...`
+- `/api/agent-runs/:id`
 
 ## Project structure
 
 ```text
 app/                 Next.js pages and route handlers
-components/          UI primitives and Milestone 1 forms
+components/          UI primitives and dashboard management panels
 lib/auth/            Better Auth and server session helpers
 lib/brands/          Brand validation and service layer
 lib/database/        Drizzle client, schema, migration, and seed
@@ -83,6 +86,7 @@ lib/health/          PostgreSQL, Redis, and Ollama probes
 lib/ai/              LLM provider contract and Ollama implementation
 lib/embeddings/      Verified-dimension embedding provider and errors
 lib/knowledge/       Chunking, indexing, retrieval, and BrandContext services
+lib/agents/          Bounded runner, trusted tool registry, agent service, and safe run persistence
 db/migrations/       Generated PostgreSQL migrations
 tests/               Vitest tests
 scripts/             Local verification helpers

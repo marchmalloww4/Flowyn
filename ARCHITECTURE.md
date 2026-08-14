@@ -1,6 +1,6 @@
 # Architecture
 
-## Milestone 4 boundary
+## Milestone 5 boundary
 
 Flowyn is intentionally a modular monolith. Milestones 1 through 4 establish the runtime, authentication, tenant boundary, role-aware membership management, brand foundation, audit trail, provider-agnostic local AI, verified local embeddings, pgvector knowledge, and bounded RAG—not the eventual automation engine.
 
@@ -15,6 +15,10 @@ graph TD
   Embed --> Ollama
   Next --> Provider[LLMProvider]
   Provider --> Ollama[Ollama HTTP API]
+  Next --> Runner[Bounded AgentRunner]
+  Runner --> Registry[Trusted ToolRegistry]
+  Runner --> Provider
+  Runner --> DB
   Next --> Redis[(Redis provisioned for later queues)]
 ```
 
@@ -46,6 +50,7 @@ graph TD
 - `lib/ai/generation-log.ts`: safe generation metadata persistence without prompt/response storage.
 - `lib/embeddings`: verified-dimension embedding contract, typed errors, configuration, and Ollama implementation.
 - `lib/knowledge`: sanitized document storage, deterministic chunking, indexing, SQL retrieval, and hybrid BrandContext.
+- `lib/agents`: soft-deletable definitions, trusted effective-tool filtering, bounded prompt construction, synchronous runner, safe run history, and brand-scoped internal tools.
 - `lib/security`: application error envelope and validation-safe responses.
 
 Business logic belongs in these modules, not in React components.
@@ -56,7 +61,7 @@ A workspace is the authorization boundary. Every brand query first resolves the 
 
 ## Data model
 
-Milestone 4 includes Better Auth tables plus:
+Milestone 5 includes Better Auth tables plus:
 
 - `workspaces` and `workspace_members`.
 - `brands`, `brand_voice_profiles`, `brand_rules`, and `brand_examples`.
@@ -65,6 +70,8 @@ Milestone 4 includes Better Auth tables plus:
 - `generation_logs` for provider, model, status, duration, character counts, and safe error codes.
 - `knowledge_documents` for workspace/brand-scoped manual knowledge, content hashes, indexing state, and safe metadata.
 - `knowledge_chunks` for deterministic chunks and validated `vector(768)` embeddings from the live `nomic-embed-text` model.
+- `agents` for workspace-owned, optionally brand-bound definitions with `allowedTools`, `enabled`, `maxSteps`, and `deletedAt`.
+- `agent_runs` and `agent_run_steps` for synchronous terminal status, bounded final responses, and safe step metadata. Run history survives agent soft deletion.
 
 Structured future Brand DNA fields are stored in JSONB where the shape is expected to evolve. Normalized rules and examples remain separate so later ingestion and analysis can attach provenance.
 
@@ -101,6 +108,10 @@ Mutation routes record sanitized audit events for workspace, membership, and bra
 `POST /api/ai/generate` requires the authenticated user to provide a workspace ID. Optional brand context is resolved through the authorized brand service and must belong to that workspace. Complete responses use JSON; `stream: true` returns native provider chunks as Server-Sent Events. Generation logs retain only safe operational metadata.
 
 Knowledge routes are protected by the same session and workspace boundary: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/:id`, `POST /api/knowledge/:id/reindex`, and `POST /api/knowledge/retrieve`. Client workspace and brand IDs are validated but never trusted without server-side brand ownership and membership checks. Embeddings are never returned to clients.
+
+Agent routes use the same session and workspace boundary: `GET/POST /api/agents`, `GET/PATCH/DELETE /api/agents/:id`, `POST /api/agents/:id/runs`, and `GET /api/agent-runs/:id`. Definitions are soft-deleted with `deletedAt`; disabled definitions remain manageable but reject new runs. The run endpoint is synchronous, accepts only a bounded goal, derives all workspace/user/brand/tool/policy context on the server, and returns a terminal result. History exposes only bounded final output and safe step metadata.
+
+The runner calls `LLMProvider.generateStructured()` with a strict tool-or-final decision schema. Its effective tools are configured names intersected with registered tools and tools valid for the trusted runtime brand context. Model observations are bounded and inserted only into delimited untrusted prompt sections; persisted steps store decision types, tool names, counts, durations, and safe error codes, never raw observations or hidden reasoning. Request aborts propagate through `AbortSignal`; durable cross-request cancellation is deferred.
 
 ## Extension points
 

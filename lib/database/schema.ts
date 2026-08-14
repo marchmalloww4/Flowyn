@@ -172,6 +172,71 @@ export const generationLogs = pgTable("generation_logs", {
   workspaceCreatedIdx: index("generation_logs_workspace_created_idx").on(table.workspaceId, table.createdAt),
 }));
 
+export type AgentRunStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED" | "MAX_STEPS_REACHED";
+export type AgentRunStepType = "MODEL_DECISION" | "TOOL_CALL" | "TOOL_RESULT" | "FINAL_RESPONSE" | "ERROR";
+export type AgentRunStepStatus = "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+
+export const agents = pgTable("agents", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  brandId: uuid("brand_id").references(() => brands.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  systemInstructions: text("system_instructions").notNull().default(""),
+  allowedTools: jsonb("allowed_tools").$type<string[]>().default([]).notNull(),
+  enabled: boolean("enabled").default(true).notNull(),
+  maxSteps: integer("max_steps").notNull().default(5),
+  createdBy: text("created_by").notNull().references(() => user.id),
+  ...timestamps,
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+}, (table) => ({
+  workspaceIdx: index("agents_workspace_idx").on(table.workspaceId),
+  brandIdx: index("agents_brand_idx").on(table.brandId),
+  workspaceNameIdx: index("agents_workspace_name_idx").on(table.workspaceId, table.name),
+  maxStepsCheck: check("agents_max_steps_check", sql`${table.maxSteps} > 0 and ${table.maxSteps} <= 100`),
+}));
+
+export const agentRuns = pgTable("agent_runs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  agentId: uuid("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  agentName: text("agent_name").notNull(),
+  startedBy: text("started_by").references(() => user.id, { onDelete: "set null" }),
+  status: text("status").$type<AgentRunStatus>().notNull().default("PENDING"),
+  goal: text("goal").notNull(),
+  stepCount: integer("step_count").notNull().default(0),
+  finalResponse: text("final_response"),
+  errorCode: text("error_code"),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  ...timestamps,
+}, (table) => ({
+  workspaceCreatedIdx: index("agent_runs_workspace_created_idx").on(table.workspaceId, table.createdAt),
+  agentIdx: index("agent_runs_agent_idx").on(table.agentId),
+  statusIdx: index("agent_runs_status_idx").on(table.workspaceId, table.status),
+  statusCheck: check("agent_runs_status_check", sql`${table.status} in ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'MAX_STEPS_REACHED')`),
+}));
+
+export const agentRunSteps = pgTable("agent_run_steps", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  runId: uuid("run_id").notNull().references(() => agentRuns.id, { onDelete: "cascade" }),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  stepNumber: integer("step_number").notNull(),
+  type: text("type").$type<AgentRunStepType>().notNull(),
+  toolName: text("tool_name"),
+  status: text("status").$type<AgentRunStepStatus>().notNull(),
+  safeInputMetadata: jsonb("safe_input_metadata").$type<Record<string, string | number | boolean | null>>().default({}).notNull(),
+  safeOutputMetadata: jsonb("safe_output_metadata").$type<Record<string, string | number | boolean | null>>().default({}).notNull(),
+  errorCode: text("error_code"),
+  startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+}, (table) => ({
+  runIdx: index("agent_run_steps_run_idx").on(table.runId, table.stepNumber),
+  workspaceIdx: index("agent_run_steps_workspace_idx").on(table.workspaceId),
+  typeCheck: check("agent_run_steps_type_check", sql`${table.type} in ('MODEL_DECISION', 'TOOL_CALL', 'TOOL_RESULT', 'FINAL_RESPONSE', 'ERROR')`),
+  statusCheck: check("agent_run_steps_status_check", sql`${table.status} in ('RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')`),
+}));
+
 export type KnowledgeIndexStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
 
 export const knowledgeDocuments = pgTable("knowledge_documents", {
@@ -215,6 +280,8 @@ export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
   memberships: many(workspaceMembers),
+  createdAgents: many(agents),
+  startedAgentRuns: many(agentRuns),
 }));
 
 export const workspaceRelations = relations(workspaces, ({ many }) => ({
@@ -222,6 +289,9 @@ export const workspaceRelations = relations(workspaces, ({ many }) => ({
   brands: many(brands),
   knowledgeDocuments: many(knowledgeDocuments),
   knowledgeChunks: many(knowledgeChunks),
+  agents: many(agents),
+  agentRuns: many(agentRuns),
+  agentRunSteps: many(agentRunSteps),
 }));
 
 export const brandRelations = relations(brands, ({ one, many }) => ({
@@ -231,6 +301,26 @@ export const brandRelations = relations(brands, ({ one, many }) => ({
   examples: many(brandExamples),
   knowledgeDocuments: many(knowledgeDocuments),
   knowledgeChunks: many(knowledgeChunks),
+  agents: many(agents),
+}));
+
+export const agentRelations = relations(agents, ({ one, many }) => ({
+  workspace: one(workspaces, { fields: [agents.workspaceId], references: [workspaces.id] }),
+  brand: one(brands, { fields: [agents.brandId], references: [brands.id] }),
+  creator: one(user, { fields: [agents.createdBy], references: [user.id] }),
+  runs: many(agentRuns),
+}));
+
+export const agentRunRelations = relations(agentRuns, ({ one, many }) => ({
+  workspace: one(workspaces, { fields: [agentRuns.workspaceId], references: [workspaces.id] }),
+  agent: one(agents, { fields: [agentRuns.agentId], references: [agents.id] }),
+  starter: one(user, { fields: [agentRuns.startedBy], references: [user.id] }),
+  steps: many(agentRunSteps),
+}));
+
+export const agentRunStepRelations = relations(agentRunSteps, ({ one }) => ({
+  run: one(agentRuns, { fields: [agentRunSteps.runId], references: [agentRuns.id] }),
+  workspace: one(workspaces, { fields: [agentRunSteps.workspaceId], references: [workspaces.id] }),
 }));
 
 export const knowledgeDocumentRelations = relations(knowledgeDocuments, ({ one, many }) => ({
@@ -258,6 +348,9 @@ export const schema = {
   brandExamples,
   auditLogs,
   generationLogs,
+  agents,
+  agentRuns,
+  agentRunSteps,
   knowledgeDocuments,
   knowledgeChunks,
 };

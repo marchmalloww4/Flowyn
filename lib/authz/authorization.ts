@@ -13,12 +13,16 @@ export type WorkspaceAction =
   | "membership.role"
   | "brand.read"
   | "brand.write"
-  | "brand.delete";
+  | "brand.delete"
+  | "agent.read"
+  | "agent.run"
+  | "agent.write"
+  | "agent.delete";
 
 export function canPerformWorkspaceAction(role: WorkspaceRole, action: WorkspaceAction): boolean {
   if (role === "OWNER") return true;
-  if (role === "ADMIN") return ["workspace.read", "workspace.update", "membership.manage", "brand.read", "brand.write", "brand.delete"].includes(action);
-  return ["workspace.read", "brand.read"].includes(action);
+  if (role === "ADMIN") return ["workspace.read", "workspace.update", "membership.manage", "brand.read", "brand.write", "brand.delete", "agent.read", "agent.run", "agent.write", "agent.delete"].includes(action);
+  return ["workspace.read", "brand.read", "agent.read", "agent.run"].includes(action);
 }
 
 function normalizeRole(role: string): WorkspaceRole {

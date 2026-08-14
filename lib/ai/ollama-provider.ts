@@ -36,21 +36,35 @@ export class OllamaProvider implements LLMProvider {
     this.fetcher = options.fetcher ?? fetch;
   }
 
-  private async request(path: string, init?: RequestInit): Promise<Response> {
+  private createRequestController(signal?: AbortSignal) {
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    return {
+      controller,
+      cleanup: () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+      },
+    };
+  }
+
+  private async request(path: string, init?: RequestInit, signal?: AbortSignal): Promise<Response> {
+    const request = this.createRequestController(signal);
     try {
-      return await this.fetcher(`${this.baseUrl}${path}`, { ...init, signal: controller.signal, cache: "no-store" });
+      return await this.fetcher(`${this.baseUrl}${path}`, { ...init, signal: request.controller.signal, cache: "no-store" });
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw new RequestTimeoutError();
       throw new ProviderUnavailableError();
     } finally {
-      clearTimeout(timer);
+      request.cleanup();
     }
   }
 
-  private async assertModelAvailable(model: string): Promise<void> {
-    const response = await this.request("/api/tags");
+  private async assertModelAvailable(model: string, signal?: AbortSignal): Promise<void> {
+    const response = await this.request("/api/tags", undefined, signal);
     if (!response.ok) throw new ProviderUnavailableError();
     let payload: OllamaTagsResponse;
     try {
@@ -76,7 +90,7 @@ export class OllamaProvider implements LLMProvider {
   async generate(input: LLMGenerateInput): Promise<LLMResult> {
     if (!input.prompt.trim()) throw new InvalidRequestError("The prompt cannot be empty.");
     const model = input.model ?? this.defaultModel;
-    await this.assertModelAvailable(model);
+    await this.assertModelAvailable(model, input.signal);
     const startedAt = performance.now();
     const body: Record<string, unknown> = {
       model,
@@ -86,7 +100,7 @@ export class OllamaProvider implements LLMProvider {
     };
     if (input.system) body.system = input.system;
     if (input.format) body.format = input.format;
-    const response = await this.request("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const response = await this.request("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, input.signal);
     let payload: OllamaGenerateResponse | null = null;
     try {
       payload = await response.json() as OllamaGenerateResponse;
@@ -102,7 +116,7 @@ export class OllamaProvider implements LLMProvider {
   }
 
   async generateStructured<T>(input: LLMStructuredInput<T>): Promise<LLMStructuredResult<T>> {
-    const result = await this.generate({ ...input, format: "json" });
+    const result = await this.generate({ ...input, format: input.format ?? "json" });
     let parsed: unknown;
     try {
       parsed = JSON.parse(result.text) as unknown;
@@ -117,9 +131,8 @@ export class OllamaProvider implements LLMProvider {
   async *stream(input: LLMGenerateInput): AsyncIterable<LLMStreamChunk> {
     if (!input.prompt.trim()) throw new InvalidRequestError("The prompt cannot be empty.");
     const model = input.model ?? this.defaultModel;
-    await this.assertModelAvailable(model);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    await this.assertModelAvailable(model, input.signal);
+    const request = this.createRequestController(input.signal);
     try {
       const body: Record<string, unknown> = {
         model,
@@ -129,7 +142,7 @@ export class OllamaProvider implements LLMProvider {
       };
       if (input.system) body.system = input.system;
       if (input.format) body.format = input.format;
-      const response = await this.fetcher(`${this.baseUrl}/api/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: controller.signal, cache: "no-store" });
+      const response = await this.fetcher(`${this.baseUrl}/api/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: request.controller.signal, cache: "no-store" });
       if (!response.ok) {
         if (response.status === 404) throw new ModelUnavailableError();
         throw new GenerationFailedError();
@@ -169,7 +182,7 @@ export class OllamaProvider implements LLMProvider {
       if (error instanceof ProviderUnavailableError || error instanceof ModelUnavailableError || error instanceof RequestTimeoutError || error instanceof GenerationFailedError || error instanceof InvalidRequestError) throw error;
       throw new ProviderUnavailableError();
     } finally {
-      clearTimeout(timer);
+      request.cleanup();
     }
   }
 

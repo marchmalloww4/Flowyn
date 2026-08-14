@@ -20,6 +20,13 @@ const envSchema = z.object({
   MAX_KNOWLEDGE_DOCUMENT_CHARS: z.coerce.number().int().positive().max(1000000).default(200000),
   RAG_MAX_CONTEXT_CHARS: z.coerce.number().int().positive().max(50000).default(8000),
   RAG_TOP_K: z.coerce.number().int().positive().max(20).default(5),
+  AGENT_MAX_STEPS_DEFAULT: z.coerce.number().int().positive().max(100).default(5),
+  AGENT_MAX_STEPS_HARD_LIMIT: z.coerce.number().int().positive().max(100).default(12),
+  AGENT_TOTAL_TIMEOUT_MS: z.coerce.number().int().positive().max(600000).default(120000),
+  AGENT_TOOL_TIMEOUT_MS: z.coerce.number().int().positive().max(300000).default(15000),
+  AGENT_MAX_GOAL_CHARS: z.coerce.number().int().positive().max(100000).default(4000),
+  AGENT_MAX_OBSERVATION_CHARS: z.coerce.number().int().positive().max(100000).default(6000),
+  AGENT_MAX_FINAL_RESPONSE_CHARS: z.coerce.number().int().positive().max(100000).default(8000),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

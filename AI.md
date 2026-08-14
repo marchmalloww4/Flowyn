@@ -68,7 +68,15 @@ Structured calls request Ollama JSON, parse the returned text with `JSON.parse`,
 4. Select the provider in `lib/ai/service.ts` using explicit trusted configuration.
 5. Add contract tests for generation, health, timeout, streaming, structured output, and model/configuration failures.
 
-The agent and workflow milestones will consume this interface, not Ollama directly.
+The agent and workflow milestones consume this interface, not Ollama directly.
+
+## Milestone 5 agent runtime
+
+The agent runner is provider-agnostic and uses `generateStructured()` with a strict two-branch decision: a registered tool call or a final response. The server calculates the effective tool set from the agent configuration, the registry, and trusted runtime context. Brand-dependent tools disappear from unbranded runs and cannot receive model-supplied workspace, user, or brand IDs.
+
+Runs are synchronous and bounded by `AGENT_MAX_STEPS_DEFAULT`, `AGENT_MAX_STEPS_HARD_LIMIT`, `AGENT_TOTAL_TIMEOUT_MS`, `AGENT_TOOL_TIMEOUT_MS`, `AGENT_MAX_GOAL_CHARS`, `AGENT_MAX_OBSERVATION_CHARS`, and `AGENT_MAX_FINAL_RESPONSE_CHARS`. The existing `AI_REQUEST_TIMEOUT_MS` bounds each model call. Request `AbortSignal` is propagated internally; `CANCELLED` is persisted only after an abort is observed, and durable cross-request cancellation is deferred.
+
+Tool results have separate model observations and persisted safe summaries. Observations are bounded, escaped, and marked untrusted in the next prompt. Steps persist only externally relevant decision types, tool names, counts, durations, and safe error codes. The runner does not request or persist chain-of-thought.
 
 ## Local embeddings and RAG
 
@@ -82,6 +90,6 @@ RAG is opt-in through `useBrandContext: true`. The prompt separates trusted stru
 
 The local verification flow makes a real embedding request, asserts the verified 768-dimensional finite vector, then runs guarded pgvector retrieval and RAG generation checks against the existing services.
 
-## Milestone 4 limitations
+## Milestone 5 limitations
 
-There is no external file import, autonomous agent loop, tool execution, memory, critic, workflow node execution, queue, scheduling, webhook, approval, integration, billing, or editor surface in this milestone. Knowledge input is manual text and indexing is synchronous.
+There is no external file import, agent memory, critic, multi-agent orchestration, visual workflow canvas, workflow node execution, queue, scheduling, webhook, approval, integration, billing, durable cancellation, or editor surface in this milestone. Knowledge input is manual text, indexing is synchronous, and agent runs are synchronous.

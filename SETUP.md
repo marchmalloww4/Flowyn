@@ -37,6 +37,13 @@ Important variables:
 | `KNOWLEDGE_CHUNK_SIZE` | Deterministic chunk size in characters | `1200` |
 | `KNOWLEDGE_CHUNK_OVERLAP` | Deterministic chunk overlap in characters | `150` |
 | `RAG_MAX_CONTEXT_CHARS` | Maximum retrieved context passed to the model | `8000` |
+| `AGENT_MAX_STEPS_DEFAULT` | Default per-run agent step limit | `5` |
+| `AGENT_MAX_STEPS_HARD_LIMIT` | Server hard ceiling for agent steps | `12` |
+| `AGENT_TOTAL_TIMEOUT_MS` | Total synchronous agent run timeout | `120000` |
+| `AGENT_TOOL_TIMEOUT_MS` | Per-tool execution timeout | `15000` |
+| `AGENT_MAX_GOAL_CHARS` | Maximum run goal length | `4000` |
+| `AGENT_MAX_OBSERVATION_CHARS` | Maximum tool observations carried into prompts | `6000` |
+| `AGENT_MAX_FINAL_RESPONSE_CHARS` | Maximum persisted agent response length | `8000` |
 
 ## Start the local services
 
@@ -84,7 +91,9 @@ Workspace membership, brand mutations, and AI generation are authorized server-s
 
 Brand knowledge is manual text scoped to a brand. Creating or re-indexing a document validates and chunks its content, calls `nomic-embed-text`, validates the live configured dimension, and replaces its chunks transactionally. RAG is opt-in through `useBrandContext: true` and retrieved text is delimited as untrusted data.
 
-`scripts/verify-local.ps1` also performs a live 768-dimensional finite-vector probe and runs the guarded Ollama/pgvector/RAG integration tests with `RUN_OLLAMA_INTEGRATION=1`. These checks require the existing Docker services and database migration to be available; they do not reset volumes.
+The dashboard Agents panel manages workspace-owned definitions and lets members run enabled agents synchronously. Definitions may be optionally bound to a brand; the server validates that relationship and removes brand-dependent tools when no trusted brand is available. DELETE is a soft delete so run history remains readable. The run body accepts only `goal`; the server supplies workspace, user, agent, brand, tool, policy, and cancellation context. GET `/api/agent-runs/:id` returns only bounded run fields and safe step summaries.
+
+`scripts/verify-local.ps1` also performs a live 768-dimensional finite-vector probe and runs the guarded Ollama/pgvector/RAG/agent integration tests with `RUN_OLLAMA_INTEGRATION=1`. These checks require the existing Docker services and database migration to be available; they do not reset volumes.
 
 ## Health checks
 

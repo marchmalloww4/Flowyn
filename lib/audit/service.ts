@@ -14,9 +14,15 @@ export type AuditAction =
   | "knowledge.created"
   | "knowledge.updated"
   | "knowledge.deleted"
-  | "knowledge.reindexed";
+  | "knowledge.reindexed"
+  | "agent.created"
+  | "agent.updated"
+  | "agent.deleted"
+  | "agent.run_started"
+  | "agent.run_completed"
+  | "agent.run_failed";
 
-export type AuditResourceType = "workspace" | "membership" | "brand" | "knowledge";
+export type AuditResourceType = "workspace" | "membership" | "brand" | "knowledge" | "agent" | "agent_run";
 
 const sensitiveKey = /(password|token|secret|credential|api[-_]?key|access[-_]?token|refresh[-_]?token)/i;
 

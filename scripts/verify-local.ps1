@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $projectRoot
 $previousRunOllamaIntegration = $env:RUN_OLLAMA_INTEGRATION
+$previousRunAgentIntegration = $env:RUN_AGENT_INTEGRATION
 
 $dockerCommand = (Get-Command docker -ErrorAction SilentlyContinue).Source
 if (-not $dockerCommand) {
@@ -24,6 +25,11 @@ function Assert-DatabaseSchema {
 SELECT 'vector_extension=' || EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector');
 SELECT 'knowledge_documents=' || (to_regclass('public.knowledge_documents') IS NOT NULL);
 SELECT 'knowledge_chunks=' || (to_regclass('public.knowledge_chunks') IS NOT NULL);
+SELECT 'agent_tables=' || (to_regclass('public.agents') IS NOT NULL AND to_regclass('public.agent_runs') IS NOT NULL AND to_regclass('public.agent_run_steps') IS NOT NULL);
+SELECT 'agent_deleted_at=' || EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'agents' AND column_name = 'deleted_at');
+SELECT 'agent_status_check=' || EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_runs_status_check');
+SELECT 'agent_step_type_check=' || EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agent_run_steps_type_check');
+SELECT 'agent_indexes=' || (to_regclass('public.agents_workspace_idx') IS NOT NULL AND to_regclass('public.agent_runs_status_idx') IS NOT NULL AND to_regclass('public.agent_run_steps_run_idx') IS NOT NULL);
 SELECT 'embedding_dimension=' || COALESCE((SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid WHERE c.relname = 'knowledge_chunks' AND a.attname = 'embedding' AND NOT a.attisdropped), 'missing');
 SELECT 'hnsw_cosine=' || EXISTS (SELECT 1 FROM pg_class idx JOIN pg_index i ON i.indexrelid = idx.oid JOIN pg_am am ON am.oid = idx.relam JOIN pg_opclass opc ON opc.oid = ANY(i.indclass) WHERE idx.relname = 'knowledge_chunks_embedding_hnsw_idx' AND am.amname = 'hnsw' AND opc.opcname = 'vector_cosine_ops');
 SELECT 'foreign_keys=' || ((SELECT count(*) FROM information_schema.table_constraints WHERE table_schema = 'public' AND table_name IN ('knowledge_documents', 'knowledge_chunks') AND constraint_type = 'FOREIGN KEY') >= 5);
@@ -37,6 +43,11 @@ SELECT 'legacy_tables=' || (to_regclass('public.user') IS NOT NULL AND to_regcla
     "vector_extension=true",
     "knowledge_documents=true",
     "knowledge_chunks=true",
+    "agent_tables=true",
+    "agent_deleted_at=true",
+    "agent_status_check=true",
+    "agent_step_type_check=true",
+    "agent_indexes=true",
     "embedding_dimension=vector(768)",
     "hnsw_cosine=true",
     "foreign_keys=true",
@@ -123,7 +134,7 @@ try {
   Assert-DatabaseSchema "flowyn"
 
   Write-Host "Applying migrations to a temporary clean database..."
-  $temporaryDatabase = "flowyn_milestone4_verify"
+  $temporaryDatabase = "flowyn_milestone5_verify"
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "postgres", "dropdb", "--if-exists", "-U", "flowyn", $temporaryDatabase)
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "postgres", "createdb", "-U", "flowyn", $temporaryDatabase)
   try {
@@ -136,15 +147,23 @@ try {
 
   Write-Host "Running host static checks and tests..."
   $env:RUN_OLLAMA_INTEGRATION = "1"
+  $env:RUN_AGENT_INTEGRATION = "1"
+  Write-Host "Running Ollama/pgvector integrations sequentially to avoid local model contention..."
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/ollama-embedding.integration.test.ts", "tests/knowledge.integration.test.ts")
+  Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/agent.integration.test.ts")
+  Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/agent-ollama.integration.test.ts")
+  Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue
+  Remove-Item Env:RUN_AGENT_INTEGRATION -ErrorAction SilentlyContinue
   Invoke-RequiredCommand $npmCommand @("run", "typecheck")
   Invoke-RequiredCommand $npmCommand @("run", "lint")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run")
   Invoke-RequiredCommand $npmCommand @("run", "build")
 
-  Write-Host "Milestone 4 local verification passed."
+  Write-Host "Milestone 5 local verification passed."
 } finally {
   if ($null -eq $previousRunOllamaIntegration) { Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue }
   else { $env:RUN_OLLAMA_INTEGRATION = $previousRunOllamaIntegration }
+  if ($null -eq $previousRunAgentIntegration) { Remove-Item Env:RUN_AGENT_INTEGRATION -ErrorAction SilentlyContinue }
+  else { $env:RUN_AGENT_INTEGRATION = $previousRunAgentIntegration }
   Pop-Location
 }
