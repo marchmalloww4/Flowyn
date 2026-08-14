@@ -118,6 +118,12 @@ The visual editor does not add an AI runtime or a second workflow representation
 
 Canvas state is an authoring projection. It serializes to the same `WorkflowDefinition` used by Advanced JSON and the existing static workflow registry. Node positions and viewport metadata are stored separately and are never passed to an LLM, agent prompt, tool registry, workflow snapshot, or execution context. The editor has no arbitrary HTTP, tool, code, shell, SQL, filesystem, browser, or dynamic module capability.
 
-## Milestone 10 limitations
+## Milestone 11 outbound integration boundary
 
-There is no external file import, agent memory, critic, multi-agent orchestration, outbound integration, OAuth, or billing in this milestone. Webhooks remain limited to the inbound HMAC protocol, and M9 approvals remain internal authenticated workspace decisions; outbound external actions and external approval channels remain deferred. Milestone 11 has not started.
+Milestone 11 does not extend the AI runtime. AI_GENERATE and AgentRunner remain behind their existing provider and static-tool boundaries; AgentRunner receives no Slack or integration tools. An `INTEGRATION_ACTION` is a static workflow step that consumes only bounded workflow expressions and a workspace-scoped credential ID after the existing human approval gate. Credentials, ciphertext, provider responses, prompts, RAG context, and hidden reasoning never cross into AI or agent context.
+
+The only connector is Slack `post_message`, executed by the existing durable worker through a fixed-target bounded egress adapter. It is disabled by default, cannot accept arbitrary URLs/methods/headers/ports, and reports only safe provider output. PostgreSQL action state and stable run/step idempotency protect duplicate workflow delivery; uncertain provider outcomes are terminal and never automatically retried.
+
+## Milestone 11 limitations
+
+There is no external file import, agent memory, critic, multi-agent orchestration, OAuth, billing, generic HTTP, arbitrary outbound integration, browser automation, external approval channel, or file upload. Webhooks remain limited to the inbound HMAC protocol, and approval decisions remain internal authenticated workspace decisions. These capabilities remain outside Milestone 11.

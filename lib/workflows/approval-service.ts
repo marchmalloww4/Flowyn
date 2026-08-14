@@ -20,6 +20,7 @@ export interface PauseWorkflowForApprovalInput {
   executionToken: string;
   requiredRole: WorkflowApprovalRole;
   expiresAfterSeconds?: number;
+  review?: string | null;
   safeMetadata: Record<string, string | number | boolean | null>;
   completedStepTypes: string[];
 }
@@ -82,6 +83,7 @@ export async function pauseWorkflowForApproval(input: PauseWorkflowForApprovalIn
       origin,
       completedStepCount: input.completedStepTypes.length,
       completedStepTypes: input.completedStepTypes,
+      review: input.review ?? undefined,
     });
 
     const request = existing ?? (await tx.insert(workflowApprovalRequests).values({

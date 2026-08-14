@@ -10,6 +10,7 @@ const labels: Record<WorkflowStepType, string> = {
   AI_GENERATE: "AI generate",
   AGENT: "Agent",
   APPROVAL: "Approval",
+  INTEGRATION_ACTION: "Slack action",
 };
 
 export function WorkflowStepPalette({ onAdd }: { onAdd: (type: WorkflowStepType) => void }) {

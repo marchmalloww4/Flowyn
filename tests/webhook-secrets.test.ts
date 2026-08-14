@@ -33,4 +33,20 @@ describe("webhook secret protection", () => {
       secretVersion: 1,
     })).toThrow();
   });
+
+  it("retains the original webhook envelope purpose and compatibility", () => {
+    const envelope = encryptWebhookSecret("whsec_legacy", {
+      encryptionKey: Buffer.alloc(32, 9),
+      keyVersion: "v1",
+      triggerId: "550e8400-e29b-41d4-a716-446655440000",
+      secretVersion: 3,
+    });
+    expect(envelope.startsWith("flowyn-webhook-secret-v1.v1.")).toBe(true);
+    expect(decryptWebhookSecret(envelope, {
+      encryptionKey: Buffer.alloc(32, 9),
+      keyVersion: "v1",
+      triggerId: "550e8400-e29b-41d4-a716-446655440000",
+      secretVersion: 3,
+    })).toBe("whsec_legacy");
+  });
 });

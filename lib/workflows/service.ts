@@ -9,6 +9,7 @@ import { getDatabase, type Database, workflowApprovalRequests, workflowEditorLay
 import { AppError } from "@/lib/security/errors";
 import { userExecutionPrincipal, webhookAutomationPrincipal, workspaceAutomationPrincipal, type ExecutionPrincipal, type WorkspaceAutomationPrincipal } from "@/lib/security/principal";
 import { validateWorkflowDefinition } from "@/lib/workflows/validation";
+import { getIntegrationCredentialById } from "@/lib/integrations/repository";
 import { getWorkflowExecutionPolicy } from "@/lib/workflows/policy";
 import { createDefaultWorkflowLayout, type WorkflowEditorLayout } from "@/lib/workflows/editor";
 import { parseWorkflowEditorLayout } from "@/lib/workflows/editor-layout";
@@ -56,6 +57,11 @@ function resourceNotFound(): AppError {
 
 async function validateReferencedResourcesForPrincipal(principal: ExecutionPrincipal, workspaceId: string, definition: WorkflowDefinition, db: Database, requireUsable: boolean): Promise<void> {
   for (const step of definition.steps) {
+    if (step.type === "INTEGRATION_ACTION") {
+      const credential = await getIntegrationCredentialById(step.config.credentialId, workspaceId, db);
+      if (!credential || credential.connectorId !== step.config.connectorId) throw resourceNotFound();
+      if (requireUsable && (credential.revokedAt || credential.deletedAt)) throw new AppError("WORKFLOW_INTEGRATION_CREDENTIAL_NOT_ALLOWED", 409, "The referenced integration credential is unavailable.");
+    }
     if (step.type === "AGENT") {
       const agent = principal.kind === "workspace_automation"
         ? await getAgentForWorkspace(workspaceId, step.config.agentId, db)
@@ -70,6 +76,10 @@ async function validateReferencedResourcesForPrincipal(principal: ExecutionPrinc
       if (brand.workspaceId !== workspaceId) throw resourceNotFound();
     }
   }
+}
+
+export async function validateWorkflowIntegrationCredentials(principal: ExecutionPrincipal, workspaceId: string, definition: WorkflowDefinition, db: Database, requireUsable: boolean): Promise<void> {
+  await validateReferencedResourcesForPrincipal(principal, workspaceId, definition, db, requireUsable);
 }
 
 async function validateReferencedResources(userId: string, workspaceId: string, definition: WorkflowDefinition, db: Database, requireUsable: boolean): Promise<void> {
@@ -235,6 +245,7 @@ export async function createWorkflowRun(userId: string, workflowId: string, inpu
   if (!workflow.enabled) throw new AppError("WORKFLOW_DISABLED", 409, "The workflow is disabled.");
   const version = await loadVersion(workflow, db);
   const definition = validateWorkflowDefinition(version.definition);
+  if (definition.steps.some((step) => step.type === "INTEGRATION_ACTION")) await requireWorkspaceAction(userId, workflow.workspaceId, "integration.execute", db);
   await validateReferencedResources(userId, workflow.workspaceId, definition, db, true);
   const policy = getWorkflowExecutionPolicy();
   if (JSON.stringify(parsedInput).length > policy.maxInputChars) throw new AppError("WORKFLOW_CONTEXT_LIMIT", 400, "Workflow input exceeds the configured limit.");

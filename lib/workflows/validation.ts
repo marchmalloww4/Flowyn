@@ -4,6 +4,8 @@ import { workflowEditorLayoutSchema } from "@/lib/workflows/editor-layout";
 import { WORKFLOW_APPROVAL_MAX_EXPIRATION_SECONDS, WORKFLOW_APPROVAL_MIN_EXPIRATION_SECONDS } from "@/lib/workflows/policy";
 import { stepIdSchema } from "@/lib/workflows/primitives";
 import type { JsonValue, WorkflowDefinition } from "@/lib/workflows/types";
+import { integrationActionConfigSchema } from "@/lib/integrations/validation";
+import { validateIntegrationApprovalPolicy } from "@/lib/workflows/integration-policy";
 
 const MAX_JSON_DEPTH = 3;
 const MAX_JSON_KEYS = 20;
@@ -96,6 +98,7 @@ const agentStepSchema = z.object({
 export const approvalConfigSchema = z.object({
   requiredRole: z.enum(["OWNER", "ADMIN"]),
   expiresAfterSeconds: z.number().int().min(WORKFLOW_APPROVAL_MIN_EXPIRATION_SECONDS).max(WORKFLOW_APPROVAL_MAX_EXPIRATION_SECONDS).optional(),
+  review: expressionSchema.optional(),
 }).strict();
 
 const approvalStepSchema = z.object({
@@ -105,7 +108,14 @@ const approvalStepSchema = z.object({
   nextStepId: stepIdSchema.optional(),
 }).strict();
 
-export const workflowStepSchema = z.discriminatedUnion("type", [setValueStepSchema, transformStepSchema, conditionStepSchema, aiGenerateStepSchema, agentStepSchema, approvalStepSchema]);
+const integrationActionStepSchema = z.object({
+  ...baseStep,
+  type: z.literal("INTEGRATION_ACTION"),
+  config: integrationActionConfigSchema,
+  nextStepId: stepIdSchema.optional(),
+}).strict();
+
+export const workflowStepSchema = z.discriminatedUnion("type", [setValueStepSchema, transformStepSchema, conditionStepSchema, aiGenerateStepSchema, agentStepSchema, approvalStepSchema, integrationActionStepSchema]);
 
 export const workflowDefinitionSchema = z.object({
   schemaVersion: z.literal(1),
@@ -116,6 +126,7 @@ export const workflowDefinitionSchema = z.object({
 export function validateWorkflowDefinition(input: unknown): WorkflowDefinition {
   const parsed = workflowDefinitionSchema.parse(input);
   validateWorkflowGraph(parsed);
+  validateIntegrationApprovalPolicy(parsed);
   return parsed;
 }
 

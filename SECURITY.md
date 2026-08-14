@@ -22,13 +22,13 @@
 - Agent definitions and runs are workspace-authorized; `agent.write`/`agent.delete` are restricted to admins/owners while members may read and run enabled definitions.
 - Agent DELETE is a soft delete (`deletedAt` plus `enabled = false`), preserving historical runs and steps.
 - Agent run bodies contain only a bounded goal. User, workspace, agent, brand, tool, policy, and abort context are derived server-side.
-- The effective tool set is the intersection of configured names, registered tools, and tools valid for the trusted runtime brand. No shell, filesystem, SQL, arbitrary HTTP, browser, dynamic code, or external integration tool is registered.
+- The effective tool set is the intersection of configured names, registered tools, and tools valid for the trusted runtime brand. No shell, filesystem, SQL, arbitrary HTTP, browser, dynamic code, or external integration tool is registered. M11's Slack operation is a static workflow connector, not an AgentRunner tool.
 - Model observations are bounded, escaped, and delimited as untrusted prompt data. Persisted step rows contain only safe summaries; hidden reasoning and raw tool output are not requested or stored.
 - Agent execution has hard step, model-call, tool-call, total-time, observation, goal, and final-response bounds. Request aborts use `AbortSignal`; durable cross-request cancellation is intentionally deferred.
 
 ## Visual workflow editor security
 
-- The editor is a projection of the existing `WorkflowDefinition`; `@xyflow/react` never executes client graph data. The server re-parses the complete definition, checks the static six-step registry, graph reachability/cycle/reference rules, and referenced agent/brand ownership on every executable save, including disabled workflows.
+- The editor is a projection of the existing `WorkflowDefinition`; `@xyflow/react` never executes client graph data. The server re-parses the complete definition, checks the static seven-step registry, graph reachability/cycle/reference rules, and referenced agent/brand/integration-credential ownership on every executable save, including disabled workflows.
 - GET and PATCH use the existing Better Auth session and centralized workspace authorization. A client-supplied workflow ID or layout workspace/version ID is never sufficient for access; workflow and layout reads include the authorized workflow workspace predicate.
 - `workflow_editor_layouts` contains only bounded coordinates and viewport values. It excludes executable config, prompts, credentials, raw inputs, tool output, and secrets; it does not affect definition hashes, snapshots, scheduler/webhook/approval state, or execution.
 - Definition and layout saves use the PostgreSQL-authoritative `currentVersionId` token and a row lock. A stale token returns `WORKFLOW_VERSION_CONFLICT` (409), so concurrent editors cannot silently overwrite a newer executable version. Failed or conflicting saves retain unsaved client state.
@@ -65,6 +65,13 @@ Durable workflow output is schema-controlled JSON separate from safe observabili
 - Event history and audit logs store only safe identifiers, hashes, sizes, status, reason codes, duplicate counts, and run links. Raw bodies, headers, signatures, and secret material are not persisted. Existing bounded workflow input history remains workspace data; senders must not include credentials in webhook payloads.
 - Webhook automation reuses the existing non-forgeable workspace automation principal with a trigger/event origin, the existing workflow snapshot/outbox/BullMQ/worker path, and the same AgentRunner, RAG, and LLMProvider boundaries. No fake user or second execution engine exists.
 
+## Outbound integration security
+
+- Integration credentials are workspace-scoped, encrypted with a separate purpose-aware AES-256-GCM keyring, and returned only as safe metadata. Secret material and ciphertext never enter workflow definitions, immutable snapshots, queues, browser responses, AI/RAG/AgentRunner context, audit metadata, or logs.
+- OWNER and ADMIN users manage credentials; MEMBER users can read safe projections only. Workflow execution resolves the credential by both workspace and static connector ID. User-initiated runs with an integration step require `integration.execute`; automation principals cannot manage credentials, select bindings, or decide approvals.
+- The only outbound target is the fixed HTTPS Slack `chat.postMessage` endpoint with a fixed POST method, server-generated headers, redirect rejection, bounded body/response sizes, JSON parsing, and timeout/abort handling. Workflows and clients cannot supply URLs, hosts, ports, methods, headers, redirects, arbitrary bodies, or dynamic code.
+- Slack `post_message` is side-effecting and requires an `APPROVAL` step on every reachable workflow path. PostgreSQL action rows claim the logical run/step before egress, recover proven success without duplicate calls, and classify unknown outcomes as terminal `AMBIGUOUS` with no automatic retry. AgentRunner receives no integration tools.
+
 ## Credential handling
 
 Never commit `.env.local`, database passwords, or provider secrets. The Compose defaults are development-only values. Replace `BETTER_AUTH_SECRET` before using a shared development machine.
@@ -80,7 +87,7 @@ A resource ID is not an authorization decision. A protected service must:
 
 ## Deferred controls
 
-SSRF protection, encrypted integration credentials, CSRF policy review, file validation, safe expression evaluation, outbound integrations, uploads, and external approval channels remain deferred. They must be implemented before HTTP tools, uploads, or external integrations are enabled. Milestone 11 has not started.
+Generic SSRF-safe HTTP, arbitrary outbound integrations, OAuth, third-party credential brokerage, CSRF policy review, file validation, uploads, external approval channels, browser automation, billing, and marketplace features remain deferred. M11 provides only encrypted workspace credentials and the fixed Slack `post_message` target; it must not be generalized into a generic HTTP client.
 
 ## Local AI boundary
 

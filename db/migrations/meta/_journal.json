@@ -78,6 +78,20 @@
       "when": 1786708795320,
       "tag": "0010_sour_arachne",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786714488371,
+      "tag": "0011_absent_longshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786715131804,
+      "tag": "0012_rainy_ego",
+      "breakpoints": true
     }
   ]
 }

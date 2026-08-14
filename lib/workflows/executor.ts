@@ -132,7 +132,7 @@ export async function executeWorkflowRun(options: ExecuteWorkflowRunOptions): Pr
       try {
         const executor = registry.get(step.type);
         const config = executor.configSchema.parse(step.config);
-        const stepResult = await executor.execute({ runId: run.id, workspaceId: run.workspaceId, actorUserId: principal.kind === "user" ? principal.userId : null, principal, workflowId: run.workflowId, workflowVersion: run.workflowVersion, triggerInput: run.input, stepOutputs, abortSignal: rootController.signal, db, provider: options.provider }, config);
+        const stepResult = await executor.execute({ runId: run.id, workspaceId: run.workspaceId, workflowStepId: step.id, workflowStepRunId: stepRun.id, actorUserId: principal.kind === "user" ? principal.userId : null, principal, workflowId: run.workflowId, workflowVersion: run.workflowVersion, triggerInput: run.input, stepOutputs, abortSignal: rootController.signal, db, provider: options.provider }, config);
         if (rootController.signal.aborted) {
           if (cancellationRequested) throw new Error("WORKFLOW_CANCELLED");
           if (totalTimedOut) throw new Error("WORKFLOW_TIMEOUT");
@@ -150,6 +150,7 @@ export async function executeWorkflowRun(options: ExecuteWorkflowRunOptions): Pr
             executionToken,
             requiredRole: stepResult.control.requiredRole,
             expiresAfterSeconds: stepResult.control.expiresAfterSeconds,
+            review: stepResult.control.review,
             safeMetadata: stepResult.safeMetadata,
             completedStepTypes: definition.steps.filter((candidate) => Object.prototype.hasOwnProperty.call(stepOutputs, candidate.id)).map((candidate) => candidate.type),
           }, db);

@@ -182,11 +182,17 @@ Milestone 10 adds an authoring projection over the existing workflow engine. `Wo
 
 The existing workflow GET returns metadata, the current definition, `currentVersionId`, the version number, and a compatible layout. Definition or layout PATCHes include `expectedVersionId`; the service locks the workflow row in PostgreSQL and returns `WORKFLOW_VERSION_CONFLICT` with HTTP 409 when another writer has advanced the token. Metadata-only updates remain compatible without a version token.
 
-The browser uses `@xyflow/react` only as a presentation/editor surface. It supports the six registered step types, drag positions, viewport state, configuration editing, and an Advanced JSON view. Canvas and raw JSON both serialize to the same `WorkflowDefinition` and pass the same server-side validation. No client-supplied node type, edge, agent, brand, workspace, role, or executable capability is trusted.
+The browser uses `@xyflow/react` only as a presentation/editor surface. It supports the seven registered step types, drag positions, viewport state, configuration editing, and an Advanced JSON view. The integration node exposes only the static Slack operation, a safe credential metadata selector, and bounded literal/reference inputs. Canvas and raw JSON both serialize to the same `WorkflowDefinition` and pass the same server-side validation. No client-supplied node type, edge, agent, brand, workspace, role, credential secret, or executable capability is trusted.
 
 `workflow_editor_layouts` stores only bounded node coordinates and viewport metadata, scoped to a workflow and the version it was viewed with. Layout never contributes to definition hashes, immutable version JSON, workflow snapshots, scheduling, webhook delivery, approval state, or execution. Missing, malformed, mismatched, or incomplete layouts fall back to a deterministic default.
 
-Milestone 10 introduces no outbound HTTP, OAuth, credentials, file uploads, browser automation, dynamic modules, arbitrary expressions, second queue, or second runtime. Milestone 11 has not started.
+## Secure outbound integrations
+
+Milestone 11 adds a workspace-scoped credential vault and one static external side effect: Slack `post_message`. Credential rows store only purpose-bound AES-256-GCM ciphertext, key/version metadata, and safe lifecycle fields. Better Auth and the existing workspace action policy authorize management; OWNER and ADMIN can manage credentials, while MEMBER can read safe metadata only. Workflow bindings contain credential IDs, never secret material, and user-initiated runs containing integration actions require `integration.execute`.
+
+The connector registry is static and operation-driven. Its bounded egress primitive maps the internal target `slack.chat.post_message` to the fixed HTTPS Slack endpoint, fixed POST method, server-generated authorization/content-type headers, no redirects, bounded request/response bytes, JSON responses, and timeouts. No workflow, API, AI prompt, AgentRunner tool, browser, or client can select a URL, host, port, method, headers, redirects, arbitrary body, or dynamic module. `INTEGRATION_EGRESS_ENABLED=false` is fail-closed by default.
+
+Integration action state is PostgreSQL-authoritative. A unique workflow-run/step identity and stable idempotency key protect duplicate delivery; proven success is recovered from PostgreSQL without another provider call. Known safe failures are retryable only when the connector declares them safe. Timeout, post-dispatch connection loss, unknown 5xx, malformed/unproven success, stale leases, worker crash boundaries, and uncertain cancellation become terminal `AMBIGUOUS` outcomes and are never automatically retried. Existing outbox, BullMQ, worker, lease, scheduler, webhook, approval, and audit paths remain authoritative.
 
 ## Extension points
 

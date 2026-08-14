@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { WorkflowCanvas } from "@/components/workflow-editor/workflow-canvas";
-import { WorkflowConfigPanel } from "@/components/workflow-editor/workflow-config-panel";
+import { WorkflowConfigPanel, type WorkflowEditorCredentialOption } from "@/components/workflow-editor/workflow-config-panel";
 import { WorkflowJsonEditor } from "@/components/workflow-editor/workflow-json-editor";
 import { WorkflowStepPalette } from "@/components/workflow-editor/workflow-step-palette";
 import { applyWorkflowEditorLayout, createDefaultWorkflowLayout, editorStateFromDefinition, serializeWorkflowEditorState, type WorkflowEditorEdge, type WorkflowEditorNode, type WorkflowEditorState } from "@/lib/workflows/editor";
@@ -11,13 +11,14 @@ import { workflowEditorReducer } from "@/lib/workflows/editor-state";
 import type { WorkflowDefinition, WorkflowStepType } from "@/lib/workflows/types";
 
 type WorkflowProjectionResponse = {
-  workflow: { id: string; name: string; currentVersion: number; currentVersionId: string | null };
+  workflow: { id: string; name: string; workspaceId: string; currentVersion: number; currentVersionId: string | null };
   definition: WorkflowDefinition;
   currentVersionId: string;
   currentVersion: number;
   layout: WorkflowEditorState["layout"];
 };
 
+type IntegrationCredentialResponse = { credentials: WorkflowEditorCredentialOption[] };
 type ApiError = Error & { code?: string; currentVersionId?: string };
 
 const emptyDefinition: WorkflowDefinition = {
@@ -57,6 +58,7 @@ function defaultNode(id: string, type: WorkflowStepType, position: { x: number; 
     AI_GENERATE: { prompt: literal, maxTokens: 400 },
     AGENT: { agentId: "00000000-0000-4000-8000-000000000000", goal: literal },
     APPROVAL: { requiredRole: "ADMIN", expiresAfterSeconds: 3600 },
+    INTEGRATION_ACTION: { connectorId: "slack", credentialId: "00000000-0000-4000-8000-000000000000", operation: "post_message", input: { channel: literal, text: literal } },
   };
   return { id, type, name: `${type.replace("_", " ")} step`, config: configs[type], position };
 }
@@ -78,12 +80,19 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
   const [rawError, setRawError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [integrationCredentials, setIntegrationCredentials] = useState<WorkflowEditorCredentialOption[]>([]);
 
   const loadProjection = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
       const projection = await readApi<WorkflowProjectionResponse>(await fetch(`/api/workflows/${workflowId}`, { cache: "no-store" }));
+      try {
+        const credentials = await readApi<IntegrationCredentialResponse>(await fetch(`/api/integration-credentials?workspaceId=${encodeURIComponent(projection.workflow.workspaceId)}`, { cache: "no-store" }));
+        setIntegrationCredentials(credentials.credentials);
+      } catch {
+        setIntegrationCredentials([]);
+      }
       const next = applyWorkflowEditorLayout(editorStateFromDefinition(projection.definition, projection.currentVersionId), projection.layout);
       dispatch({ type: "replace-state", state: next });
       setMessage(null);
@@ -161,5 +170,5 @@ export function WorkflowEditor({ workflowId }: { workflowId: string }) {
   if (loading) return <div className="rounded-2xl border border-slate-200 p-5 text-sm text-slate-500 dark:border-slate-800">Loading visual editor…</div>;
   if (loadError) return <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">{loadError}</div>;
 
-  return <section className="rounded-3xl border border-violet-200 bg-white p-5 shadow-sm dark:border-violet-900/60 dark:bg-slate-950"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-violet-600">Visual workflow editor</p><h3 className="mt-1 text-xl font-semibold">Edit the executable graph safely</h3><p className="mt-1 text-sm text-slate-500">Version {state.versionId ? "loaded" : "unloaded"}. Layout changes never enter the executable definition.</p></div><div className="flex gap-2"><Button type="button" variant={mode === "canvas" ? "default" : "outline"} size="sm" onClick={() => setMode("canvas")}>Canvas</Button><Button type="button" variant={mode === "advanced" ? "default" : "outline"} size="sm" onClick={() => { setMode("advanced"); setRawDefinition(JSON.stringify(serializeWorkflowEditorState(state), null, 2)); }}>Advanced JSON</Button><Button type="button" size="sm" onClick={() => void save()} disabled={saving || !state.dirty}>{saving ? "Saving…" : "Save version"}</Button></div></div>{mode === "canvas" ? <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]"><div className="space-y-4"><WorkflowCanvas state={state} onSelectNode={(nodeId) => dispatch({ type: "select-node", nodeId })} onMoveNode={(nodeId, position) => dispatch({ type: "update-node", nodeId, patch: { position } })} onViewportChange={(viewport) => dispatch({ type: "update-viewport", viewport })} /><WorkflowStepPalette onAdd={addStep} /></div><div className="space-y-4"><WorkflowConfigPanel node={selectedNode} onUpdate={(patch) => selectedNode && dispatch({ type: "update-node", nodeId: selectedNode.id, patch })} /><div className="rounded-2xl border border-slate-200 p-4 text-xs leading-5 text-slate-500 dark:border-slate-800">The server enforces the six registered step types, graph reachability, workspace ownership, and agent/brand references on every executable save.</div></div></div> : <div className="mt-5"><WorkflowJsonEditor value={rawDefinition} onChange={setRawDefinition} onApply={applyRawDefinition} error={rawError} /></div>}{state.error && <p role="alert" className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{state.error}</p>}{message && <p role="status" className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-300">{message}</p>}</section>;
+  return <section className="rounded-3xl border border-violet-200 bg-white p-5 shadow-sm dark:border-violet-900/60 dark:bg-slate-950"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-violet-600">Visual workflow editor</p><h3 className="mt-1 text-xl font-semibold">Edit the executable graph safely</h3><p className="mt-1 text-sm text-slate-500">Version {state.versionId ? "loaded" : "unloaded"}. Layout changes never enter the executable definition.</p></div><div className="flex gap-2"><Button type="button" variant={mode === "canvas" ? "default" : "outline"} size="sm" onClick={() => setMode("canvas")}>Canvas</Button><Button type="button" variant={mode === "advanced" ? "default" : "outline"} size="sm" onClick={() => { setMode("advanced"); setRawDefinition(JSON.stringify(serializeWorkflowEditorState(state), null, 2)); }}>Advanced JSON</Button><Button type="button" size="sm" onClick={() => void save()} disabled={saving || !state.dirty}>{saving ? "Saving…" : "Save version"}</Button></div></div>{mode === "canvas" ? <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]"><div className="space-y-4"><WorkflowCanvas state={state} onSelectNode={(nodeId) => dispatch({ type: "select-node", nodeId })} onMoveNode={(nodeId, position) => dispatch({ type: "update-node", nodeId, patch: { position } })} onViewportChange={(viewport) => dispatch({ type: "update-viewport", viewport })} /><WorkflowStepPalette onAdd={addStep} /></div><div className="space-y-4"><WorkflowConfigPanel node={selectedNode} integrationCredentials={integrationCredentials} onUpdate={(patch) => selectedNode && dispatch({ type: "update-node", nodeId: selectedNode.id, patch })} /><div className="rounded-2xl border border-slate-200 p-4 text-xs leading-5 text-slate-500 dark:border-slate-800">The server enforces the seven registered step types, graph reachability, workspace ownership, approval coverage, and agent/brand references on every executable save.</div></div></div> : <div className="mt-5"><WorkflowJsonEditor value={rawDefinition} onChange={setRawDefinition} onApply={applyRawDefinition} error={rawError} /></div>}{state.error && <p role="alert" className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{state.error}</p>}{message && <p role="status" className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-300">{message}</p>}</section>;
 }

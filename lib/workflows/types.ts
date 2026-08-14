@@ -2,11 +2,13 @@ import type { ZodType } from "zod";
 import type { Database } from "@/lib/database";
 import type { LLMProvider } from "@/lib/ai/types";
 import type { ExecutionPrincipal } from "@/lib/security/principal";
+import type { IntegrationActionConfig } from "@/lib/integrations/types";
+export type { IntegrationActionConfig } from "@/lib/integrations/types";
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
-export const WORKFLOW_STEP_TYPES = ["SET_VALUE", "TRANSFORM", "CONDITION", "AI_GENERATE", "AGENT", "APPROVAL"] as const;
+export const WORKFLOW_STEP_TYPES = ["SET_VALUE", "TRANSFORM", "CONDITION", "AI_GENERATE", "AGENT", "APPROVAL", "INTEGRATION_ACTION"] as const;
 export type WorkflowStepType = (typeof WORKFLOW_STEP_TYPES)[number];
 export type WorkflowApprovalRole = "OWNER" | "ADMIN";
 
@@ -58,6 +60,7 @@ export interface AgentConfig {
 export interface WorkflowApprovalConfig {
   requiredRole: WorkflowApprovalRole;
   expiresAfterSeconds?: number;
+  review?: WorkflowValueExpression;
 }
 
 export type WorkflowStep =
@@ -66,7 +69,8 @@ export type WorkflowStep =
   | { id: string; type: "CONDITION"; name: string; config: ConditionConfig }
   | { id: string; type: "AI_GENERATE"; name: string; config: AIGenerateConfig; nextStepId?: string }
   | { id: string; type: "AGENT"; name: string; config: AgentConfig; nextStepId?: string }
-  | { id: string; type: "APPROVAL"; name: string; config: WorkflowApprovalConfig; nextStepId?: string };
+  | { id: string; type: "APPROVAL"; name: string; config: WorkflowApprovalConfig; nextStepId?: string }
+  | { id: string; type: "INTEGRATION_ACTION"; name: string; config: IntegrationActionConfig; nextStepId?: string };
 
 export interface WorkflowDefinition {
   schemaVersion: 1;
@@ -82,6 +86,8 @@ export interface WorkflowContext {
 export interface WorkflowStepExecutionContext {
   runId: string;
   workspaceId: string;
+  workflowStepId?: string;
+  workflowStepRunId?: string;
   actorUserId: string | null;
   principal?: ExecutionPrincipal;
   workflowId: string;
@@ -106,6 +112,7 @@ export interface WorkflowStepControl {
   type: "WAITING_APPROVAL";
   requiredRole: WorkflowApprovalRole;
   expiresAfterSeconds?: number;
+  review?: string;
 }
 
 export interface WorkflowStepExecutor<TConfig> {

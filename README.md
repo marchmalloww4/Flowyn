@@ -2,7 +2,7 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1 through 10**:
+This repository currently contains **Milestones 1 through 11**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -19,10 +19,11 @@ This repository currently contains **Milestones 1 through 10**:
 - Durable CRON, interval, and one-time workflow schedules with PostgreSQL occurrence uniqueness, bounded misfire handling, a dedicated scheduler process, Redis heartbeat health, and workspace-scoped schedule history.
 - Secure inbound workflow webhooks with encrypted rotatable secrets, HMAC/timestamp verification, Redis admission limits, PostgreSQL delivery deduplication, durable event/run/outbox transactions, safe delivery history, and a workspace-isolated management panel.
 - Durable human approval gates with a static APPROVAL workflow step, PostgreSQL-owned waiting/decision/expiration/cancellation state, protected workspace approval inbox APIs, safe bounded approval context, and generation-aware workflow continuation dispatch.
-- A server-validated visual workflow editor that projects the existing six-step workflow definition into a React Flow canvas, persists layout separately, supports Advanced JSON round-tripping, and rejects stale saves with optimistic `currentVersionId` concurrency.
+- A server-validated visual workflow editor that projects the existing seven-step workflow definition into a React Flow canvas, persists layout separately, supports Advanced JSON round-tripping, and rejects stale saves with optimistic `currentVersionId` concurrency.
+- A workspace-isolated encrypted integration credential vault, static Slack `post_message` connector, fixed-target bounded egress, approval-aware `INTEGRATION_ACTION` workflow step, PostgreSQL-authoritative idempotent action state, safe recovery semantics, and protected credential-management APIs.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, Ollama behavior, agent policy, runner boundaries, protected APIs, and safe persistence.
 
-Outbound integrations, OAuth, billing, browser automation, file uploads, and general DAG or loop orchestration remain outside Milestone 10 and are intentionally deferred. Milestone 11 has not started.
+OAuth, generic HTTP, arbitrary outbound targets, billing, browser automation, file uploads, and general DAG or loop orchestration remain outside Milestone 11 and are intentionally deferred.
 
 ## Quick start
 
@@ -58,7 +59,9 @@ Webhook management APIs are available at `/api/workflow-webhooks` and its resour
 
 Approval APIs are available at `/api/workflow-approvals`, `/api/workflow-approvals/:id`, `/api/workflow-approvals/:id/approve`, and `/api/workflow-approvals/:id/reject`. Members can read safe approval projections; only currently authorized ADMIN or OWNER users can decide according to the immutable step policy. Automation principals, AI, agents, webhook callers, and workflow input cannot decide approvals.
 
-Workflow editing uses the existing `/api/workflows/:id` GET/PATCH routes. GET returns the current executable definition, version token, and compatible metadata-only layout. Definition or layout saves include `expectedVersionId`; a stale token returns `WORKFLOW_VERSION_CONFLICT` with HTTP 409. The dashboard Canvas view supports the six registered steps, while Advanced JSON uses the same definition serializer and server validation path.
+Integration APIs are available at `/api/integrations/catalog` and `/api/integration-credentials` with its resource and rotation routes. OWNER and ADMIN users can manage workspace-scoped Slack credentials; MEMBER users can read safe metadata only. Secrets are encrypted server-side, returned in no safe projection, and never enter workflow definitions, queues, AI/agent context, audit metadata, or logs. Real Slack egress is disabled by default and accepts only the static `slack.chat.post_message` target.
+
+Workflow editing uses the existing `/api/workflows/:id` GET/PATCH routes. GET returns the current executable definition, version token, and compatible metadata-only layout. Definition or layout saves include `expectedVersionId`; a stale token returns `WORKFLOW_VERSION_CONFLICT` with HTTP 409. The dashboard Canvas view supports the seven registered steps, including the fixed Slack action configuration, while Advanced JSON uses the same definition serializer and server validation path.
 
 ## Verification
 
@@ -110,7 +113,8 @@ lib/knowledge/       Chunking, indexing, retrieval, and BrandContext services
 lib/agents/          Bounded runner, trusted tool registry, agent service, and safe run persistence
 lib/schedules/       Schedule validation/calculation, occurrence processing, scheduler runtime, and heartbeat
 lib/webhooks/        HMAC protocol, encrypted secrets, bounded ingress, deduplication, rate limiting, management, and safe history
-lib/workflows/       Immutable workflow definitions, static executors, durable runs/outbox, schedules, webhooks, human approval gates, and editor projection/concurrency
+lib/workflows/       Immutable workflow definitions, static executors, durable runs/outbox, schedules, webhooks, human approval gates, integration actions, and editor projection/concurrency
+lib/integrations/    Static connector catalog, encrypted credential lifecycle, fixed Slack egress, and durable action state
 db/migrations/       Generated PostgreSQL migrations
 tests/               Vitest tests
 scripts/             Local verification helpers

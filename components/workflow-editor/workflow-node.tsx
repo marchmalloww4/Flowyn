@@ -17,6 +17,7 @@ const stepColors: Record<WorkflowStepType, string> = {
   AI_GENERATE: "border-violet-300 bg-violet-50",
   AGENT: "border-blue-300 bg-blue-50",
   APPROVAL: "border-emerald-300 bg-emerald-50",
+  INTEGRATION_ACTION: "border-fuchsia-300 bg-fuchsia-50",
 };
 
 export function WorkflowNode({ data, selected }: NodeProps<WorkflowFlowNode>) {

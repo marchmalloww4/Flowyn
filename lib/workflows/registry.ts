@@ -6,6 +6,7 @@ import { setValueExecutor } from "@/lib/workflows/executors/set-value";
 import { transformExecutor } from "@/lib/workflows/executors/transform";
 import { approvalExecutor } from "@/lib/workflows/executors/approval";
 import { WORKFLOW_STEP_TYPES, type WorkflowStep, type WorkflowStepExecutor, type WorkflowStepType } from "@/lib/workflows/types";
+import { integrationActionExecutor } from "@/lib/workflows/executors/integration-action";
 
 export class WorkflowStepRegistry {
   private readonly executors = new Map<WorkflowStepType, WorkflowStepExecutor<unknown>>();
@@ -30,6 +31,7 @@ export function createDefaultWorkflowStepRegistry(): WorkflowStepRegistry {
   registry.register(aiGenerateExecutor);
   registry.register(agentExecutor);
   registry.register(approvalExecutor);
+  registry.register(integrationActionExecutor);
   return registry;
 }
 

@@ -71,6 +71,19 @@ Milestone 8 webhook variables:
 | WEBHOOK_EVENT_RETENTION_DAYS | Delivery metadata retention period | `30` |
 | WEBHOOK_PUBLIC_BASE_URL | Trusted base URL displayed for webhook endpoints | `http://localhost:3000` |
 
+Milestone 11 integration variables:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `INTEGRATION_EGRESS_ENABLED` | Enables the fixed Slack outbound transport | `false` |
+| `INTEGRATION_CREDENTIAL_KEYRING_JSON` | Server-only JSON map of key versions to base64 32-byte keys | development-only local keyring |
+| `INTEGRATION_CREDENTIAL_CURRENT_KEY_VERSION` | Key version used for newly encrypted integration credentials | `v1` |
+| `INTEGRATION_REQUEST_TIMEOUT_MS` | Fixed-target request timeout | `10000` |
+| `INTEGRATION_MAX_REQUEST_BYTES` | Maximum Slack request body size | `16384` |
+| `INTEGRATION_MAX_RESPONSE_BYTES` | Maximum provider response size | `65536` |
+
+Keep `INTEGRATION_EGRESS_ENABLED=false` for ordinary local development. Enabling it permits only the server-controlled Slack `post_message` connector; it does not enable arbitrary HTTP. Store non-development key material in an approved secret manager. Integration tokens are entered through the authenticated credential panel, encrypted immediately, and never shown again.
+
 Generate a real deployment key with an approved secret manager or a cryptographically secure 32-byte random value encoded as base64. Never reuse the documented development key outside local development. Webhook secrets are shown only once when created or rotated.
 
 ## Start the local services
@@ -121,15 +134,15 @@ Brand knowledge is manual text scoped to a brand. Creating or re-indexing a docu
 
 The dashboard Agents panel manages workspace-owned definitions and lets members run enabled agents synchronously. Definitions may be optionally bound to a brand; the server validates that relationship and removes brand-dependent tools when no trusted brand is available. DELETE is a soft delete so run history remains readable. The run body accepts only `goal`; the server supplies workspace, user, agent, brand, tool, policy, and cancellation context. GET `/api/agent-runs/:id` returns only bounded run fields and safe step summaries.
 
-scripts/verify-local.ps1 performs a live finite-vector probe, uses that verified dimension when checking PostgreSQL, and runs the guarded Ollama/pgvector/RAG/agent/workflow/scheduling integration tests. These checks require the existing Docker services and database migration to be available; they do not reset volumes.
+scripts/verify-local.ps1 performs a live finite-vector probe, uses that verified dimension when checking PostgreSQL, and runs the guarded Ollama/pgvector/RAG/agent/workflow/scheduling/integration tests. These checks require the existing Docker services and database migration to be available; they do not reset volumes. Real Slack tests are opt-in only and require `RUN_SLACK_INTEGRATION=1`, `INTEGRATION_TEST_SLACK_TOKEN`, and `INTEGRATION_TEST_SLACK_CHANNEL`.
 
-The dashboard Workflows panel accepts a strict JSON definition and creates immutable versions. Runs are queued through a PostgreSQL outbox and BullMQ, then executed by the worker. Supported steps are SET_VALUE, TRANSFORM, CONDITION, AI_GENERATE, AGENT, and APPROVAL. APPROVAL requires `requiredRole` OWNER or ADMIN and may specify `expiresAfterSeconds` from 60 through 31,536,000 seconds; an absent value waits indefinitely. The worker releases its lease while waiting. Approval resumes the same immutable snapshot through a generation-aware outbox continuation; rejection, expiration, and waiting cancellation are terminal.
+The dashboard Workflows panel accepts a strict JSON definition and creates immutable versions. Runs are queued through a PostgreSQL outbox and BullMQ, then executed by the worker. Supported steps are SET_VALUE, TRANSFORM, CONDITION, AI_GENERATE, AGENT, APPROVAL, and INTEGRATION_ACTION. APPROVAL requires `requiredRole` OWNER or ADMIN and may specify `expiresAfterSeconds` from 60 through 31,536,000 seconds; an absent value waits indefinitely. The worker releases its lease while waiting. Approval resumes the same immutable snapshot through a generation-aware outbox continuation; rejection, expiration, and waiting cancellation are terminal. An integration action is valid only when every reachable path crosses an approval-required APPROVAL step and its credential ID belongs to the workflow workspace.
 
 The dashboard Workflow schedules panel creates CRON, INTERVAL, and ONE_TIME schedules for existing workflows. Schedule state and occurrence history are stored in PostgreSQL; the scheduler service polls due rows, creates the existing durable workflow run/outbox records, and the worker executes them. Check the scheduler with docker compose exec scheduler npm run scheduler:health. Members can view schedules and history; admins and owners can mutate them.
 
 The dashboard Secure workflow webhooks panel creates workspace-owned triggers for existing workflows. Public requests must include `X-Flowyn-Timestamp` and `X-Flowyn-Signature: v1=<hex>`, where the HMAC-SHA256 message is `<timestamp>.<exact raw body bytes>`. A signed request is durably deduplicated in PostgreSQL before the existing outbox/worker path runs. Event history stores hashes, sizes, status, duplicate counts, and run links only; it does not store raw bodies, headers, signatures, or secrets. Members can read safe history; admins and owners can mutate triggers.
 
-The dashboard Workflows panel also provides a Canvas editor for existing workflows. The canvas and Advanced JSON views edit the same six-step `WorkflowDefinition`; node coordinates and viewport are stored separately in `workflow_editor_layouts`. Save requests include the loaded `currentVersionId`, and a concurrent save returns HTTP 409 `WORKFLOW_VERSION_CONFLICT` without discarding unsaved edits. Agent and brand references are rechecked server-side even when a workflow is disabled.
+The dashboard Workflows panel also provides a Canvas editor for existing workflows. The canvas and Advanced JSON views edit the same seven-step `WorkflowDefinition`; the Slack action uses a static connector/operation and safe credential metadata selector, while node coordinates and viewport are stored separately in `workflow_editor_layouts`. Save requests include the loaded `currentVersionId`, and a concurrent save returns HTTP 409 `WORKFLOW_VERSION_CONFLICT` without discarding unsaved edits. Agent, brand, and integration credential references are rechecked server-side even when a workflow is disabled.
 
 ## Health checks
 
@@ -167,6 +180,7 @@ It additionally checks schedule tables, occurrence uniqueness, scheduler heartbe
 It also checks webhook tables, encrypted-secret projections, protocol bounds, public route deduplication, and the existing workflow outbox path without exposing credentials or raw delivery bodies.
 It also checks approval tables, role/status/expiry constraints, safe projections, manual/scheduled/webhook pause and resume, rejection, expiration, cancellation, role enforcement, decision races, idempotency, and continuation generation without rerunning completed steps.
 It also checks the visual-editor layout table/indexes, definition projection, version-scoped layout persistence, and concurrent first-writer-wins saves in `tests/workflow-editor.integration.test.ts`.
+It also checks integration credential/action tables and constraints, purpose-bound secret encryption, fixed Slack registry/egress behavior, approval coverage, safe credential projections, duplicate action recovery, ambiguous outcome handling, and integration API authorization. A real Slack provider call is never part of the default verification run.
 
 ## Troubleshooting
 

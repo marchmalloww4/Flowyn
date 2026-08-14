@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { parseSecretKeyring } from "@/lib/security/keyring";
+
+const booleanEnv = (defaultValue: boolean) => z.preprocess((value) => value === undefined ? defaultValue : value === true || value === "true", z.boolean());
+const defaultIntegrationKeyring = JSON.stringify({ v1: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" });
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -51,6 +55,19 @@ const envSchema = z.object({
   WEBHOOK_RATE_LIMIT_TRIGGER_PER_MINUTE: z.coerce.number().int().positive().max(100000).default(120),
   WEBHOOK_EVENT_RETENTION_DAYS: z.coerce.number().int().positive().max(365).default(30),
   WEBHOOK_PUBLIC_BASE_URL: z.string().url().default("http://localhost:3000"),
+  INTEGRATION_EGRESS_ENABLED: booleanEnv(false),
+  INTEGRATION_CREDENTIAL_KEYRING_JSON: z.string().min(1).default(defaultIntegrationKeyring),
+  INTEGRATION_CREDENTIAL_CURRENT_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/).default("v1"),
+  INTEGRATION_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30000).default(10000),
+  INTEGRATION_MAX_REQUEST_BYTES: z.coerce.number().int().min(1024).max(65536).default(16384),
+  INTEGRATION_MAX_RESPONSE_BYTES: z.coerce.number().int().min(1024).max(262144).default(65536),
+}).superRefine((value, ctx) => {
+  try {
+    const keyring = parseSecretKeyring(value.INTEGRATION_CREDENTIAL_KEYRING_JSON);
+    if (!keyring.has(value.INTEGRATION_CREDENTIAL_CURRENT_KEY_VERSION)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["INTEGRATION_CREDENTIAL_CURRENT_KEY_VERSION"], message: "The current integration credential key version is not present in the keyring." });
+  } catch {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["INTEGRATION_CREDENTIAL_KEYRING_JSON"], message: "The integration credential keyring is invalid." });
+  }
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

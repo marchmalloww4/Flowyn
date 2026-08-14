@@ -14,6 +14,7 @@ $previousRunSchedulerIntegration = $env:RUN_SCHEDULER_INTEGRATION
 $previousRunWebhookIntegration = $env:RUN_WEBHOOK_INTEGRATION
 $previousRunApprovalIntegration = $env:RUN_APPROVAL_INTEGRATION
 $previousRunWorkflowEditorIntegration = $env:RUN_WORKFLOW_EDITOR_INTEGRATION
+$previousRunSlackIntegration = $env:RUN_SLACK_INTEGRATION
 
 $dockerCommand = (Get-Command docker -ErrorAction SilentlyContinue).Source
 if (-not $dockerCommand) {
@@ -63,6 +64,9 @@ SELECT 'approval_dispatch_generation=' || EXISTS (SELECT 1 FROM information_sche
 SELECT 'workflow_editor_layouts=' || (to_regclass('public.workflow_editor_layouts') IS NOT NULL);
 SELECT 'workflow_editor_layout_unique=' || (to_regclass('public.workflow_editor_layouts_workflow_idx') IS NOT NULL);
 SELECT 'workflow_editor_layout_foreign_keys=' || ((SELECT count(*) FROM information_schema.table_constraints WHERE table_schema = 'public' AND table_name = 'workflow_editor_layouts' AND constraint_type = 'FOREIGN KEY') = 4);
+SELECT 'integration_tables=' || (to_regclass('public.integration_credentials') IS NOT NULL AND to_regclass('public.integration_action_runs') IS NOT NULL);
+SELECT 'integration_constraints=' || (EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'integration_credentials_secret_version_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'integration_action_runs_status_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'integration_action_runs_attempt_check'));
+SELECT 'integration_indexes=' || (to_regclass('public.integration_credentials_workspace_name_idx') IS NOT NULL AND to_regclass('public.integration_action_runs_workspace_idempotency_idx') IS NOT NULL AND to_regclass('public.integration_action_runs_logical_action_idx') IS NOT NULL AND to_regclass('public.integration_action_runs_workflow_run_idx') IS NOT NULL);
 "@
   $output = & $dockerCommand compose exec -T postgres psql -U flowyn -d $DatabaseName -Atc $query
   if ($LASTEXITCODE -ne 0) { throw "PostgreSQL schema inspection failed for database $DatabaseName." }
@@ -101,7 +105,10 @@ SELECT 'workflow_editor_layout_foreign_keys=' || ((SELECT count(*) FROM informat
     "approval_dispatch_generation=true",
     "workflow_editor_layouts=true",
     "workflow_editor_layout_unique=true",
-    "workflow_editor_layout_foreign_keys=true"
+    "workflow_editor_layout_foreign_keys=true",
+    "integration_tables=true",
+    "integration_constraints=true",
+    "integration_indexes=true"
   )
   foreach ($expected in $required) {
     if ($checks -notcontains $expected) { throw "PostgreSQL schema check failed for ${DatabaseName}: expected $expected, got $($checks -join ', ')." }
@@ -187,7 +194,7 @@ try {
   Assert-DatabaseSchema "flowyn" $verifiedEmbeddingDimension
 
   Write-Host "Applying migrations to a temporary clean database..."
-  $temporaryDatabase = "flowyn_milestone10_verify"
+  $temporaryDatabase = "flowyn_milestone11_verify"
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "postgres", "dropdb", "--if-exists", "-U", "flowyn", $temporaryDatabase)
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "postgres", "createdb", "-U", "flowyn", $temporaryDatabase)
   try {
@@ -218,6 +225,12 @@ try {
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/webhook.integration.test.ts")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/workflow-approval.integration.test.ts")
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/workflow-editor.integration.test.ts")
+  if ($env:RUN_SLACK_INTEGRATION -eq "1") {
+    Write-Host "Running the explicitly enabled real Slack integration test..."
+    Invoke-RequiredCommand $npmCommand @("test", "--", "--run", "tests/slack-real.integration.test.ts")
+  } else {
+    Write-Host "Skipping real Slack integration test; set RUN_SLACK_INTEGRATION=1 with dedicated test credentials to enable it."
+  }
   Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue
   Remove-Item Env:RUN_AGENT_INTEGRATION -ErrorAction SilentlyContinue
   Remove-Item Env:RUN_WORKFLOW_INTEGRATION -ErrorAction SilentlyContinue
@@ -231,7 +244,7 @@ try {
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run")
   Invoke-RequiredCommand $npmCommand @("run", "build")
 
-  Write-Host "Milestone 10 local verification passed."
+  Write-Host "Milestone 11 local verification passed."
 } finally {
   if ($null -eq $previousRunOllamaIntegration) { Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue }
   else { $env:RUN_OLLAMA_INTEGRATION = $previousRunOllamaIntegration }
@@ -249,5 +262,7 @@ try {
   else { $env:RUN_APPROVAL_INTEGRATION = $previousRunApprovalIntegration }
   if ($null -eq $previousRunWorkflowEditorIntegration) { Remove-Item Env:RUN_WORKFLOW_EDITOR_INTEGRATION -ErrorAction SilentlyContinue }
   else { $env:RUN_WORKFLOW_EDITOR_INTEGRATION = $previousRunWorkflowEditorIntegration }
+  if ($null -eq $previousRunSlackIntegration) { Remove-Item Env:RUN_SLACK_INTEGRATION -ErrorAction SilentlyContinue }
+  else { $env:RUN_SLACK_INTEGRATION = $previousRunSlackIntegration }
   Pop-Location
 }

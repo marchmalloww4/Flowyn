@@ -1,10 +1,13 @@
 import { approvalConfigSchema } from "@/lib/workflows/validation";
+import { createWorkflowContext } from "@/lib/workflows/context";
+import { resolveApprovalReview } from "@/lib/workflows/approvals";
 import type { WorkflowApprovalConfig, WorkflowStepExecutor } from "@/lib/workflows/types";
 
 export const approvalExecutor: WorkflowStepExecutor<WorkflowApprovalConfig> = {
   type: "APPROVAL",
   configSchema: approvalConfigSchema,
-  async execute(_context, config) {
+  async execute(context, config) {
+    const review = resolveApprovalReview(config.review, createWorkflowContext({ triggerInput: context.triggerInput, stepOutputs: context.stepOutputs }));
     return {
       output: null,
       nextStepId: null,
@@ -17,6 +20,7 @@ export const approvalExecutor: WorkflowStepExecutor<WorkflowApprovalConfig> = {
         type: "WAITING_APPROVAL",
         requiredRole: config.requiredRole,
         ...(config.expiresAfterSeconds === undefined ? {} : { expiresAfterSeconds: config.expiresAfterSeconds }),
+        ...(review === undefined ? {} : { review }),
       },
     };
   },

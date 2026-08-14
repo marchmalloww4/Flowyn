@@ -14,6 +14,7 @@ import {
 import type { WorkspaceRole } from "@/lib/workspaces/roles";
 import { embeddingVector } from "@/lib/database/vector";
 import type { JsonValue, WorkflowApprovalRole, WorkflowDefinition } from "@/lib/workflows/types";
+import type { IntegrationActionStatus } from "@/lib/integrations/types";
 import type { WorkflowEditorLayout } from "@/lib/workflows/editor";
 
 const timestamps = {
@@ -155,6 +156,26 @@ export const auditLogs = pgTable("audit_logs", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   workspaceCreatedIdx: index("audit_logs_workspace_created_idx").on(table.workspaceId, table.createdAt),
+}));
+
+export const integrationCredentials = pgTable("integration_credentials", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  connectorId: text("connector_id").notNull(),
+  name: text("name").notNull(),
+  encryptedSecretMaterial: text("encrypted_secret_material").notNull(),
+  keyVersion: text("key_version").notNull(),
+  secretVersion: integer("secret_version").notNull().default(1),
+  createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+  ...timestamps,
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+}, (table) => ({
+  workspaceNameIdx: uniqueIndex("integration_credentials_workspace_name_idx").on(table.workspaceId, table.name),
+  workspaceIdx: index("integration_credentials_workspace_idx").on(table.workspaceId),
+  activeIdx: index("integration_credentials_active_idx").on(table.workspaceId, table.revokedAt, table.deletedAt),
+  secretVersionCheck: check("integration_credentials_secret_version_check", sql`${table.secretVersion} > 0`),
 }));
 
 export const generationLogs = pgTable("generation_logs", {
@@ -472,8 +493,39 @@ export const workflowStepRuns = pgTable("workflow_step_runs", {
   attemptIdx: uniqueIndex("workflow_step_runs_attempt_idx").on(table.workflowRunId, table.stepId, table.attempt),
   workspaceIdx: index("workflow_step_runs_workspace_idx").on(table.workspaceId),
   statusCheck: check("workflow_step_runs_status_check", sql`${table.status} in ('RUNNING', 'WAITING_APPROVAL', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'INTERRUPTED')`),
-  stepTypeCheck: check("workflow_step_runs_step_type_check", sql`${table.stepType} in ('SET_VALUE', 'TRANSFORM', 'CONDITION', 'AI_GENERATE', 'AGENT', 'APPROVAL')`),
+  stepTypeCheck: check("workflow_step_runs_step_type_check", sql`${table.stepType} in ('SET_VALUE', 'TRANSFORM', 'CONDITION', 'AI_GENERATE', 'AGENT', 'APPROVAL', 'INTEGRATION_ACTION')`),
   attemptCheck: check("workflow_step_runs_attempt_check", sql`${table.attempt} > 0`),
+}));
+
+export const integrationActionRuns = pgTable("integration_action_runs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  workflowRunId: uuid("workflow_run_id").notNull().references(() => workflowRuns.id, { onDelete: "cascade" }),
+  workflowStepId: text("workflow_step_id").notNull(),
+  workflowStepRunId: uuid("workflow_step_run_id").notNull().references(() => workflowStepRuns.id, { onDelete: "cascade" }),
+  connectorId: text("connector_id").notNull(),
+  operation: text("operation").notNull(),
+  credentialId: uuid("credential_id").notNull().references(() => integrationCredentials.id, { onDelete: "restrict" }),
+  credentialSecretVersion: integer("credential_secret_version").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  attempt: integer("attempt").notNull().default(1),
+  status: text("status").$type<IntegrationActionStatus>().notNull().default("PENDING"),
+  providerRequestId: text("provider_request_id"),
+  safeResponseMetadata: jsonb("safe_response_metadata").$type<Record<string, string | number | boolean | null>>().default({}).notNull(),
+  safeOutput: jsonb("safe_output").$type<JsonValue>(),
+  errorCode: text("error_code"),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  ...timestamps,
+}, (table) => ({
+  logicalActionIdx: uniqueIndex("integration_action_runs_logical_action_idx").on(table.workflowRunId, table.workflowStepId),
+  idempotencyIdx: uniqueIndex("integration_action_runs_workspace_idempotency_idx").on(table.workspaceId, table.idempotencyKey),
+  workspaceStatusIdx: index("integration_action_runs_workspace_status_idx").on(table.workspaceId, table.status, table.updatedAt),
+  workflowRunIdx: index("integration_action_runs_workflow_run_idx").on(table.workflowRunId),
+  statusCheck: check("integration_action_runs_status_check", sql`${table.status} in ('PENDING', 'IN_FLIGHT', 'SUCCEEDED', 'FAILED', 'AMBIGUOUS', 'CANCELLED')`),
+  attemptCheck: check("integration_action_runs_attempt_check", sql`${table.attempt} > 0`),
+  credentialSecretVersionCheck: check("integration_action_runs_credential_secret_version_check", sql`${table.credentialSecretVersion} > 0`),
 }));
 
 export const workflowRunDispatches = pgTable("workflow_run_dispatches", {
@@ -559,6 +611,12 @@ export const workspaceRelations = relations(workspaces, ({ many }) => ({
   workflowScheduleOccurrences: many(workflowScheduleOccurrences),
   workflowWebhookTriggers: many(workflowWebhookTriggers),
   workflowWebhookEvents: many(workflowWebhookEvents),
+  integrationCredentials: many(integrationCredentials),
+}));
+
+export const integrationCredentialRelations = relations(integrationCredentials, ({ one }) => ({
+  workspace: one(workspaces, { fields: [integrationCredentials.workspaceId], references: [workspaces.id] }),
+  creator: one(user, { fields: [integrationCredentials.createdBy], references: [user.id] }),
 }));
 
 export const brandRelations = relations(brands, ({ one, many }) => ({
@@ -658,6 +716,13 @@ export const workflowStepRunRelations = relations(workflowStepRuns, ({ one }) =>
   agentRun: one(agentRuns, { fields: [workflowStepRuns.agentRunId], references: [agentRuns.id] }),
 }));
 
+export const integrationActionRunRelations = relations(integrationActionRuns, ({ one }) => ({
+  workspace: one(workspaces, { fields: [integrationActionRuns.workspaceId], references: [workspaces.id] }),
+  workflowRun: one(workflowRuns, { fields: [integrationActionRuns.workflowRunId], references: [workflowRuns.id] }),
+  workflowStepRun: one(workflowStepRuns, { fields: [integrationActionRuns.workflowStepRunId], references: [workflowStepRuns.id] }),
+  credential: one(integrationCredentials, { fields: [integrationActionRuns.credentialId], references: [integrationCredentials.id] }),
+}));
+
 export const workflowApprovalRequestRelations = relations(workflowApprovalRequests, ({ one }) => ({
   workspace: one(workspaces, { fields: [workflowApprovalRequests.workspaceId], references: [workspaces.id] }),
   run: one(workflowRuns, { fields: [workflowApprovalRequests.workflowRunId], references: [workflowRuns.id] }),
@@ -707,6 +772,8 @@ export const schema = {
   workflowWebhookEvents,
   workflowStepRuns,
   workflowRunDispatches,
+  integrationCredentials,
+  integrationActionRuns,
   knowledgeDocuments,
   knowledgeChunks,
 };
