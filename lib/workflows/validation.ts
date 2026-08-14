@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { validateWorkflowGraph } from "@/lib/workflows/graph";
+import { WORKFLOW_APPROVAL_MAX_EXPIRATION_SECONDS, WORKFLOW_APPROVAL_MIN_EXPIRATION_SECONDS } from "@/lib/workflows/policy";
 import type { JsonValue, WorkflowDefinition } from "@/lib/workflows/types";
 
 const MAX_JSON_DEPTH = 3;
@@ -91,7 +92,19 @@ const agentStepSchema = z.object({
   nextStepId: stepIdSchema.optional(),
 }).strict();
 
-export const workflowStepSchema = z.discriminatedUnion("type", [setValueStepSchema, transformStepSchema, conditionStepSchema, aiGenerateStepSchema, agentStepSchema]);
+export const approvalConfigSchema = z.object({
+  requiredRole: z.enum(["OWNER", "ADMIN"]),
+  expiresAfterSeconds: z.number().int().min(WORKFLOW_APPROVAL_MIN_EXPIRATION_SECONDS).max(WORKFLOW_APPROVAL_MAX_EXPIRATION_SECONDS).optional(),
+}).strict();
+
+const approvalStepSchema = z.object({
+  ...baseStep,
+  type: z.literal("APPROVAL"),
+  config: approvalConfigSchema,
+  nextStepId: stepIdSchema.optional(),
+}).strict();
+
+export const workflowStepSchema = z.discriminatedUnion("type", [setValueStepSchema, transformStepSchema, conditionStepSchema, aiGenerateStepSchema, agentStepSchema, approvalStepSchema]);
 
 export const workflowDefinitionSchema = z.object({
   schemaVersion: z.literal(1),

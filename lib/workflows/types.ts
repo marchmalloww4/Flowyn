@@ -6,7 +6,8 @@ import type { ExecutionPrincipal } from "@/lib/security/principal";
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
-export type WorkflowStepType = "SET_VALUE" | "TRANSFORM" | "CONDITION" | "AI_GENERATE" | "AGENT";
+export type WorkflowStepType = "SET_VALUE" | "TRANSFORM" | "CONDITION" | "AI_GENERATE" | "AGENT" | "APPROVAL";
+export type WorkflowApprovalRole = "OWNER" | "ADMIN";
 
 export interface WorkflowValueExpressionLiteral {
   kind: "literal";
@@ -53,12 +54,18 @@ export interface AgentConfig {
   goal: WorkflowValueExpression;
 }
 
+export interface WorkflowApprovalConfig {
+  requiredRole: WorkflowApprovalRole;
+  expiresAfterSeconds?: number;
+}
+
 export type WorkflowStep =
   | { id: string; type: "SET_VALUE"; name: string; config: SetValueConfig; nextStepId?: string }
   | { id: string; type: "TRANSFORM"; name: string; config: TransformConfig; nextStepId?: string }
   | { id: string; type: "CONDITION"; name: string; config: ConditionConfig }
   | { id: string; type: "AI_GENERATE"; name: string; config: AIGenerateConfig; nextStepId?: string }
-  | { id: string; type: "AGENT"; name: string; config: AgentConfig; nextStepId?: string };
+  | { id: string; type: "AGENT"; name: string; config: AgentConfig; nextStepId?: string }
+  | { id: string; type: "APPROVAL"; name: string; config: WorkflowApprovalConfig; nextStepId?: string };
 
 export interface WorkflowDefinition {
   schemaVersion: 1;
@@ -91,6 +98,13 @@ export interface WorkflowStepResult {
   retryable?: boolean;
   safeMetadata: Record<string, string | number | boolean | null>;
   agentRunId?: string;
+  control?: WorkflowStepControl;
+}
+
+export interface WorkflowStepControl {
+  type: "WAITING_APPROVAL";
+  requiredRole: WorkflowApprovalRole;
+  expiresAfterSeconds?: number;
 }
 
 export interface WorkflowStepExecutor<TConfig> {

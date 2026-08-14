@@ -1,5 +1,8 @@
 import { getEnv } from "@/lib/env";
 
+export const WORKFLOW_APPROVAL_MIN_EXPIRATION_SECONDS = 60;
+export const WORKFLOW_APPROVAL_MAX_EXPIRATION_SECONDS = 31_536_000;
+
 export interface WorkflowExecutionPolicy {
   maxSteps: number;
   totalTimeoutMs: number;

@@ -4,6 +4,7 @@ import { agentExecutor } from "@/lib/workflows/executors/agent";
 import { aiGenerateExecutor } from "@/lib/workflows/executors/ai-generate";
 import { setValueExecutor } from "@/lib/workflows/executors/set-value";
 import { transformExecutor } from "@/lib/workflows/executors/transform";
+import { approvalExecutor } from "@/lib/workflows/executors/approval";
 import type { WorkflowStep, WorkflowStepExecutor, WorkflowStepType } from "@/lib/workflows/types";
 
 export class WorkflowStepRegistry {
@@ -28,11 +29,12 @@ export function createDefaultWorkflowStepRegistry(): WorkflowStepRegistry {
   registry.register(conditionExecutor);
   registry.register(aiGenerateExecutor);
   registry.register(agentExecutor);
+  registry.register(approvalExecutor);
   return registry;
 }
 
 export function isWorkflowStepType(value: string): value is WorkflowStepType {
-  return ["SET_VALUE", "TRANSFORM", "CONDITION", "AI_GENERATE", "AGENT"].includes(value);
+  return ["SET_VALUE", "TRANSFORM", "CONDITION", "AI_GENERATE", "AGENT", "APPROVAL"].includes(value);
 }
 
 export function stepTypeOf(step: WorkflowStep): WorkflowStepType {
