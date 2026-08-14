@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   principalUserId,
   userExecutionPrincipal,
+  webhookAutomationPrincipal,
   workspaceAutomationPrincipal,
 } from "@/lib/security/principal";
 
@@ -15,6 +16,18 @@ describe("execution principals", () => {
   it("represents schedule-owned automation without a fake user", () => {
     const principal = workspaceAutomationPrincipal("workspace-1", "schedule-1");
     expect(principal).toEqual({ kind: "workspace_automation", workspaceId: "workspace-1", scheduleId: "schedule-1" });
+    expect(principalUserId(principal)).toBeNull();
+  });
+
+  it("represents webhook-owned automation without a fake user", () => {
+    const principal = webhookAutomationPrincipal("workspace-1", "trigger-1", "event-1");
+    expect(principal).toEqual({
+      kind: "workspace_automation",
+      workspaceId: "workspace-1",
+      webhookTriggerId: "trigger-1",
+      webhookEventId: "event-1",
+      origin: { type: "webhook", webhookTriggerId: "trigger-1", webhookEventId: "event-1" },
+    });
     expect(principalUserId(principal)).toBeNull();
   });
 

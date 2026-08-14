@@ -32,4 +32,11 @@ describe("workflow scheduler runtime", () => {
     await runtime.close();
     expect(state.values.has(SCHEDULER_HEARTBEAT_KEY)).toBe(false);
   });
+
+  it("runs bounded webhook event cleanup as best-effort maintenance", async () => {
+    const cleanup = vi.fn().mockResolvedValue(3);
+    const runtime = await startWorkflowScheduler({ schedulerId: "scheduler-cleanup-test", pollIntervalMs: 100, heartbeatTtlSeconds: 30, process: state.process, cleanup });
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    await runtime.close();
+  });
 });

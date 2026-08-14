@@ -102,6 +102,10 @@ Scheduled workflows reuse the existing workflow snapshot, outbox, BullMQ, worker
 
 The scheduler supports five-field CRON, bounded INTERVAL, and terminal ONE_TIME schedules. PostgreSQL occurrence uniqueness and deterministic workflow idempotency prevent duplicate logical runs when schedulers overlap or restart. SKIP and FIRE_ONCE misfires are bounded by the configured grace window.
 
+## Milestone 8 secure webhook workflow execution
+
+Webhook-triggered AI and Agent steps use the same path. An authenticated webhook payload is bounded workflow input only; it cannot select a provider, model, endpoint, agent, tool, brand, workspace, or user. After PostgreSQL event/run/outbox commit, the existing worker resolves the webhook automation origin and invokes the static workflow registry. AI calls remain behind `LLMProvider`, RAG remains workspace/brand filtered, and agent calls remain behind the controlled AgentRunner.
+
 ## Milestone 7 limitations
 
-There is no external file import, agent memory, critic, multi-agent orchestration, visual workflow canvas, webhook, approval, integration, or billing in this milestone. Scheduling is limited to local PostgreSQL-backed CRON, INTERVAL, and ONE_TIME triggers; external triggers remain deferred.
+There is no external file import, agent memory, critic, multi-agent orchestration, visual workflow canvas, approval, outbound integration, OAuth, or billing in this milestone. Webhooks are limited to the inbound HMAC protocol documented in the project security documentation; outbound external actions remain deferred.

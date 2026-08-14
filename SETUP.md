@@ -58,6 +58,21 @@ Milestone 7 scheduling variables:
 | SCHEDULE_MIN_INTERVAL_SECONDS | Minimum interval schedule period | 60 |
 | SCHEDULE_MAX_INTERVAL_SECONDS | Maximum interval schedule period | 31536000 |
 
+Milestone 8 webhook variables:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| WEBHOOK_SECRET_ENCRYPTION_KEY | Base64-encoded 32-byte AES-GCM key for webhook secrets | development-only local key |
+| WEBHOOK_SECRET_KEY_VERSION | Version label for encrypted secret envelopes | `v1` |
+| WEBHOOK_REPLAY_WINDOW_SECONDS | Accepted timestamp skew | `300` |
+| WEBHOOK_MAX_BODY_BYTES | Maximum raw JSON request size | `262144` |
+| WEBHOOK_RATE_LIMIT_GLOBAL_PER_MINUTE | Global public webhook admission limit | `600` |
+| WEBHOOK_RATE_LIMIT_TRIGGER_PER_MINUTE | Per-trigger public webhook admission limit | `120` |
+| WEBHOOK_EVENT_RETENTION_DAYS | Delivery metadata retention period | `30` |
+| WEBHOOK_PUBLIC_BASE_URL | Trusted base URL displayed for webhook endpoints | `http://localhost:3000` |
+
+Generate a real deployment key with an approved secret manager or a cryptographically secure 32-byte random value encoded as base64. Never reuse the documented development key outside local development. Webhook secrets are shown only once when created or rotated.
+
 ## Start the local services
 
 ```powershell
@@ -112,6 +127,8 @@ The dashboard Workflows panel accepts a strict JSON definition and creates immut
 
 The dashboard Workflow schedules panel creates CRON, INTERVAL, and ONE_TIME schedules for existing workflows. Schedule state and occurrence history are stored in PostgreSQL; the scheduler service polls due rows, creates the existing durable workflow run/outbox records, and the worker executes them. Check the scheduler with docker compose exec scheduler npm run scheduler:health. Members can view schedules and history; admins and owners can mutate them.
 
+The dashboard Secure workflow webhooks panel creates workspace-owned triggers for existing workflows. Public requests must include `X-Flowyn-Timestamp` and `X-Flowyn-Signature: v1=<hex>`, where the HMAC-SHA256 message is `<timestamp>.<exact raw body bytes>`. A signed request is durably deduplicated in PostgreSQL before the existing outbox/worker path runs. Event history stores hashes, sizes, status, duplicate counts, and run links only; it does not store raw bodies, headers, signatures, or secrets. Members can read safe history; admins and owners can mutate triggers.
+
 ## Health checks
 
 ```powershell
@@ -145,6 +162,7 @@ The script validates Compose, starts services, waits for app and dependency heal
 
 The full local verification script also checks workflow tables, constraints, leases, outbox fields, worker heartbeat, clean migrations, BullMQ execution, immutable snapshots, and workflow/Ollama integration. It never resets databases or deletes Docker volumes.
 It additionally checks schedule tables, occurrence uniqueness, scheduler heartbeat, bounded one-time execution, and schedule-to-worker delivery.
+It also checks webhook tables, encrypted-secret projections, protocol bounds, public route deduplication, and the existing workflow outbox path without exposing credentials or raw delivery bodies.
 
 ## Troubleshooting
 

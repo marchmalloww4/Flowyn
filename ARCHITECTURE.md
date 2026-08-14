@@ -58,6 +58,7 @@ graph TD
 - `lib/knowledge`: sanitized document storage, deterministic chunking, indexing, SQL retrieval, and hybrid BrandContext.
 - `lib/agents`: soft-deletable definitions, trusted effective-tool filtering, bounded prompt construction, synchronous runner, safe run history, and brand-scoped internal tools.
 - `lib/schedules`: schedule validation, timezone-aware calculation, bounded misfire policy, atomic occurrence processing, scheduler runtime, and heartbeat health.
+- `lib/webhooks`: HMAC protocol, versioned encrypted secrets, bounded ingress, Redis admission limits, PostgreSQL delivery deduplication, management services, and safe delivery projections.
 - `lib/security`: application error envelope and validation-safe responses.
 
 Business logic belongs in these modules, not in React components.
@@ -84,6 +85,14 @@ CRON accepts five fields and stores UTC instants with an IANA timezone. INTERVAL
 
 Scheduled AI and Agent steps reuse LLMProvider, BrandContext/RAG, and the controlled AgentRunner through a workspace automation principal. No user record is fabricated and workflow_runs.started_by remains NULL. The schedule and occurrence provide the verified workspace/schedule scope to the executor.
 
+## Secure inbound workflow webhooks
+
+`workflow_webhook_triggers` stores workspace/workflow ownership, a random public identifier, enabled state, and an encrypted versioned secret. `workflow_webhook_events` stores bounded delivery metadata and a unique `(trigger_id, dedupe_key)` barrier; it never stores raw request bodies, headers, signatures, or plaintext secrets. Event metadata expires through a bounded scheduler maintenance pass.
+
+`POST /api/hooks/:publicId` applies Redis global/per-trigger admission limits, bounds the raw body, verifies the timestamp and HMAC over the exact bytes, validates the existing workflow input contract, and performs one PostgreSQL transaction. That transaction inserts or deduplicates the event, handles disabled/deleted workflows as safe `SKIPPED` history, or creates the existing workflow run and outbox record. The route returns `202` only after commit. Redis is not correctness state and public ingress fails closed when Redis is unavailable.
+
+The public request cannot supply or override workspace, user, workflow, role, principal, tool, model, endpoint, or execution configuration. Accepted webhook runs use `started_by = NULL` and the existing workspace automation principal with a webhook trigger/event origin. The worker still resolves the workflow snapshot and uses only the static workflow registry, LLMProvider, workspace/brand-filtered RAG, and controlled AgentRunner. There is no outbound HTTP, OAuth, arbitrary network, shell, SQL, filesystem, code, or browser capability.
+
 ## Tenant isolation
 
 A workspace is the authorization boundary. Every brand query first resolves the brand’s workspace, then checks membership for the authenticated user. A client-provided resource ID is never sufficient for access. Unauthorized workspace resources return 404 to avoid exposing their existence.
@@ -105,6 +114,7 @@ Milestones 6 and 7 include Better Auth tables plus:
 Structured future Brand DNA fields are stored in JSONB where the shape is expected to evolve. Normalized rules and examples remain separate so later ingestion and analysis can attach provenance.
 
 The schedule tables are workflow_schedules and workflow_schedule_occurrences. The latter stores bounded trigger outcomes and links to workflow runs; its unique schedule/instant key is the duplicate barrier.
+Webhook tables are workflow_webhook_triggers and workflow_webhook_events. The latter stores payload hashes/sizes, bounded dedupe state, safe status/reason metadata, expiry, and an optional workflow-run link. Secret ciphertext is never returned by safe projections.
 
 ## Runtime services
 
@@ -140,6 +150,8 @@ Mutation routes record sanitized audit events for workspace, membership, and bra
 `POST /api/ai/generate` requires the authenticated user to provide a workspace ID. Optional brand context is resolved through the authorized brand service and must belong to that workspace. Complete responses use JSON; `stream: true` returns native provider chunks as Server-Sent Events. Generation logs retain only safe operational metadata.
 
 Schedule routes are GET/POST /api/workflow-schedules, GET/PATCH/DELETE /api/workflow-schedules/:id, POST /api/workflow-schedules/:id/enable, POST /api/workflow-schedules/:id/disable, and GET /api/workflow-schedules/:id/occurrences. Members can read schedules and history; admins and owners can mutate schedules. Every schedule, workflow, occurrence, and run lookup is checked against the authenticated workspace.
+
+Webhook routes are GET/POST /api/workflow-webhooks, GET/PATCH/DELETE /api/workflow-webhooks/:id, POST /api/workflow-webhooks/:id/enable, POST /api/workflow-webhooks/:id/disable, POST /api/workflow-webhooks/:id/rotate-secret, and GET /api/workflow-webhooks/:id/events. Members can read safe trigger/history projections; admins and owners can mutate. Public POST /api/hooks/:publicId is authenticated by the trigger secret and is restricted to the trigger's configured workflow.
 
 Knowledge routes are protected by the same session and workspace boundary: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/:id`, `POST /api/knowledge/:id/reindex`, and `POST /api/knowledge/retrieve`. Client workspace and brand IDs are validated but never trusted without server-side brand ownership and membership checks. Embeddings are never returned to clients.
 

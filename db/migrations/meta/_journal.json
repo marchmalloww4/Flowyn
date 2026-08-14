@@ -57,6 +57,13 @@
       "when": 1786686134575,
       "tag": "0007_mean_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786693381104,
+      "tag": "0008_slippery_karen_page",
+      "breakpoints": true
     }
   ]
 }

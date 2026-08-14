@@ -38,9 +38,15 @@ export type AuditAction =
   | "workflow_schedule.disabled"
   | "workflow_schedule.deleted"
   | "workflow_schedule.triggered"
-  | "workflow_schedule.skipped";
+  | "workflow_schedule.skipped"
+  | "workflow_webhook.created"
+  | "workflow_webhook.updated"
+  | "workflow_webhook.enabled"
+  | "workflow_webhook.disabled"
+  | "workflow_webhook.secret_rotated"
+  | "workflow_webhook.deleted";
 
-export type AuditResourceType = "workspace" | "membership" | "brand" | "knowledge" | "agent" | "agent_run" | "workflow" | "workflow_run" | "workflow_schedule" | "workflow_schedule_occurrence";
+export type AuditResourceType = "workspace" | "membership" | "brand" | "knowledge" | "agent" | "agent_run" | "workflow" | "workflow_run" | "workflow_schedule" | "workflow_schedule_occurrence" | "workflow_webhook" | "workflow_webhook_event";
 
 const sensitiveKey = /(password|token|secret|credential|api[-_]?key|access[-_]?token|refresh[-_]?token)/i;
 

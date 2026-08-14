@@ -2,7 +2,7 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1, 2, 3, 4, 5, 6, and 7**:
+This repository currently contains **Milestones 1 through 8**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -17,9 +17,10 @@ This repository currently contains **Milestones 1, 2, 3, 4, 5, 6, and 7**:
 - Controlled synchronous agents with soft-deleted definitions, bounded decisions, trusted runtime context, an allowlisted tool registry, safe run history, and request cancellation propagation.
 - Durable versioned workflows with bounded JSON graph steps, PostgreSQL snapshots and outbox delivery, BullMQ execution, leases, stale-worker protection, durable cancellation, and safe run history.
 - Durable CRON, interval, and one-time workflow schedules with PostgreSQL occurrence uniqueness, bounded misfire handling, a dedicated scheduler process, Redis heartbeat health, and workspace-scoped schedule history.
+- Secure inbound workflow webhooks with encrypted rotatable secrets, HMAC/timestamp verification, Redis admission limits, PostgreSQL delivery deduplication, durable event/run/outbox transactions, safe delivery history, and a workspace-isolated management panel.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, Ollama behavior, agent policy, runner boundaries, protected APIs, and safe persistence.
 
-Webhooks, approvals, integrations, billing, visual canvas editing, and general DAG or loop orchestration remain outside Milestone 7 and are intentionally deferred.
+Approvals, outbound integrations, OAuth, billing, visual canvas editing, browser automation, file uploads, and general DAG or loop orchestration remain outside Milestone 8 and are intentionally deferred.
 
 ## Quick start
 
@@ -50,6 +51,8 @@ For full setup and troubleshooting, see [SETUP.md](SETUP.md). For architecture d
 The Compose worker service is independently startable and consumes durable workflow jobs. The scheduler service uses the same application image, PostgreSQL schedule truth, and a Redis heartbeat checked by npm run scheduler:health. No schedule truth is stored in BullMQ repeatable jobs.
 
 Schedule APIs are available at `/api/workflow-schedules`, `/api/workflow-schedules/:id`, and `/api/workflow-schedules/:id/occurrences`; schedule mutation requires workspace ADMIN or OWNER access, while members can read schedules and history.
+
+Webhook management APIs are available at `/api/workflow-webhooks` and its resource, enable/disable, secret-rotation, and event-history routes. Public delivery uses `POST /api/hooks/:publicId` with the documented HMAC headers. Management mutation requires workspace ADMIN or OWNER access; members can read safe configuration and history. The public route never accepts workspace, user, workflow, role, principal, tool, model, endpoint, or execution choices from the sender.
 
 ## Verification
 
@@ -100,6 +103,7 @@ lib/embeddings/      Verified-dimension embedding provider and errors
 lib/knowledge/       Chunking, indexing, retrieval, and BrandContext services
 lib/agents/          Bounded runner, trusted tool registry, agent service, and safe run persistence
 lib/schedules/       Schedule validation/calculation, occurrence processing, scheduler runtime, and heartbeat
+lib/webhooks/        HMAC protocol, encrypted secrets, bounded ingress, deduplication, rate limiting, management, and safe history
 db/migrations/       Generated PostgreSQL migrations
 tests/               Vitest tests
 scripts/             Local verification helpers

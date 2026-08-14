@@ -5,9 +5,9 @@ import { getAgent, getAgentForWorkspace } from "@/lib/agents/service";
 import { getBrand, getBrandForWorkspace } from "@/lib/brands/service";
 import { requireWorkspaceAction, requireWorkspaceMember } from "@/lib/authz/authorization";
 import { recordAuditEvent } from "@/lib/audit/service";
-import { getDatabase, type Database, workflowRunDispatches, workflowRuns, workflowScheduleOccurrences, workflowStepRuns, workflowVersions, workflows } from "@/lib/database";
+import { getDatabase, type Database, workflowRunDispatches, workflowRuns, workflowScheduleOccurrences, workflowStepRuns, workflowVersions, workflowWebhookEvents, workflowWebhookTriggers, workflows } from "@/lib/database";
 import { AppError } from "@/lib/security/errors";
-import { userExecutionPrincipal, workspaceAutomationPrincipal, type ExecutionPrincipal, type WorkspaceAutomationPrincipal } from "@/lib/security/principal";
+import { userExecutionPrincipal, webhookAutomationPrincipal, workspaceAutomationPrincipal, type ExecutionPrincipal, type WorkspaceAutomationPrincipal } from "@/lib/security/principal";
 import { validateWorkflowDefinition } from "@/lib/workflows/validation";
 import { getWorkflowExecutionPolicy } from "@/lib/workflows/policy";
 import type { JsonValue, WorkflowDefinition } from "@/lib/workflows/types";
@@ -212,10 +212,69 @@ export interface ScheduledWorkflowRunInput {
   idempotencyKey: string;
 }
 
-export async function createScheduledWorkflowRun(input: ScheduledWorkflowRunInput, db: Database = getDatabase()): Promise<WorkflowRun> {
-  if (input.principal.workspaceId !== input.workspaceId || input.principal.scheduleId !== input.scheduleId) {
-    throw new AppError("WORKFLOW_PRINCIPAL_INVALID", 500, "The scheduled workflow principal is out of scope.");
+export interface WebhookWorkflowRunInput {
+  principal: WorkspaceAutomationPrincipal;
+  webhookTriggerId: string;
+  webhookEventId: string;
+  workspaceId: string;
+  workflowId: string;
+  input: JsonValue;
+  idempotencyKey: string;
+}
+
+type AutomationWorkflowRunInput = {
+  principal: WorkspaceAutomationPrincipal;
+  workspaceId: string;
+  workflowId: string;
+  input: JsonValue;
+  idempotencyKey: string;
+  origin:
+    | { type: "schedule"; scheduleId: string; occurrenceId: string }
+    | { type: "webhook"; webhookTriggerId: string; webhookEventId: string };
+};
+
+async function validateAutomationOrigin(input: AutomationWorkflowRunInput, db: Database): Promise<void> {
+  if (input.principal.workspaceId !== input.workspaceId) {
+    throw new AppError("WORKFLOW_PRINCIPAL_INVALID", 500, "The automation workflow principal is out of scope.");
   }
+
+  if (input.origin.type === "schedule") {
+    if (input.principal.scheduleId !== input.origin.scheduleId) {
+      throw new AppError("WORKFLOW_PRINCIPAL_INVALID", 500, "The scheduled workflow principal is out of scope.");
+    }
+    const [occurrence] = await db.select({ id: workflowScheduleOccurrences.id })
+      .from(workflowScheduleOccurrences)
+      .where(and(
+        eq(workflowScheduleOccurrences.id, input.origin.occurrenceId),
+        eq(workflowScheduleOccurrences.scheduleId, input.origin.scheduleId),
+        eq(workflowScheduleOccurrences.workspaceId, input.workspaceId),
+      ))
+      .limit(1);
+    if (!occurrence) throw new AppError("WORKFLOW_PRINCIPAL_INVALID", 500, "The scheduled workflow origin is invalid.");
+    return;
+  }
+
+  if (input.principal.webhookTriggerId !== input.origin.webhookTriggerId || input.principal.webhookEventId !== input.origin.webhookEventId) {
+    throw new AppError("WORKFLOW_PRINCIPAL_INVALID", 500, "The webhook workflow principal is out of scope.");
+  }
+  const [event] = await db.select({ id: workflowWebhookEvents.id, triggerId: workflowWebhookEvents.triggerId, workspaceId: workflowWebhookEvents.workspaceId })
+    .from(workflowWebhookEvents)
+    .where(and(
+      eq(workflowWebhookEvents.id, input.origin.webhookEventId),
+      eq(workflowWebhookEvents.triggerId, input.origin.webhookTriggerId),
+      eq(workflowWebhookEvents.workspaceId, input.workspaceId),
+    ))
+    .limit(1);
+  if (!event) throw new AppError("WORKFLOW_PRINCIPAL_INVALID", 500, "The webhook workflow origin is invalid.");
+  const [trigger] = await db.select({ id: workflowWebhookTriggers.id, workspaceId: workflowWebhookTriggers.workspaceId })
+    .from(workflowWebhookTriggers)
+    .where(and(eq(workflowWebhookTriggers.id, event.triggerId), eq(workflowWebhookTriggers.workspaceId, event.workspaceId)))
+    .limit(1);
+  if (!trigger) throw new AppError("WORKFLOW_PRINCIPAL_INVALID", 500, "The webhook workflow trigger is invalid.");
+}
+
+export async function createAutomationWorkflowRun(input: AutomationWorkflowRunInput, db: Database = getDatabase()): Promise<WorkflowRun> {
+  await validateAutomationOrigin(input, db);
   if (!input.idempotencyKey || input.idempotencyKey.length > 120) {
     throw new AppError("WORKFLOW_IDEMPOTENCY_CONFLICT", 400, "The workflow idempotency key is invalid.");
   }
@@ -252,8 +311,44 @@ export async function createScheduledWorkflowRun(input: ScheduledWorkflowRunInpu
     throw new AppError("WORKFLOW_RUN_CREATE_FAILED", 500, "Workflow run could not be created.");
   }
   await db.insert(workflowRunDispatches).values({ runId: run.id, status: "PENDING", attempts: 0 }).returning();
-  await recordAuditEvent({ workspaceId: run.workspaceId, actorUserId: null, action: "workflow.run_queued", resourceType: "workflow_run", resourceId: run.id, metadata: { workflowId: workflow.id, version: version.version, scheduleId: input.scheduleId, occurrenceId: input.occurrenceId, principalKind: input.principal.kind } }, db);
+  await recordAuditEvent({
+    workspaceId: run.workspaceId,
+    actorUserId: null,
+    action: "workflow.run_queued",
+    resourceType: "workflow_run",
+    resourceId: run.id,
+    metadata: {
+      workflowId: workflow.id,
+      version: version.version,
+      principalKind: input.principal.kind,
+      ...(input.origin.type === "schedule"
+        ? { scheduleId: input.origin.scheduleId, occurrenceId: input.origin.occurrenceId }
+        : { webhookTriggerId: input.origin.webhookTriggerId, webhookEventId: input.origin.webhookEventId }),
+    },
+  }, db);
   return run;
+}
+
+export async function createScheduledWorkflowRun(input: ScheduledWorkflowRunInput, db: Database = getDatabase()): Promise<WorkflowRun> {
+  return createAutomationWorkflowRun({
+    principal: input.principal,
+    workspaceId: input.workspaceId,
+    workflowId: input.workflowId,
+    input: input.input,
+    idempotencyKey: input.idempotencyKey,
+    origin: { type: "schedule", scheduleId: input.scheduleId, occurrenceId: input.occurrenceId },
+  }, db);
+}
+
+export async function createWebhookWorkflowRun(input: WebhookWorkflowRunInput, db: Database = getDatabase()): Promise<WorkflowRun> {
+  return createAutomationWorkflowRun({
+    principal: input.principal,
+    workspaceId: input.workspaceId,
+    workflowId: input.workflowId,
+    input: input.input,
+    idempotencyKey: input.idempotencyKey,
+    origin: { type: "webhook", webhookTriggerId: input.webhookTriggerId, webhookEventId: input.webhookEventId },
+  }, db);
 }
 
 export async function getWorkflowRun(userId: string, runId: string, db: Database = getDatabase()): Promise<WorkflowRunHistory> {
@@ -275,8 +370,18 @@ export async function resolveWorkflowRunPrincipal(run: WorkflowRun, db: Database
     .from(workflowScheduleOccurrences)
     .where(and(eq(workflowScheduleOccurrences.workflowRunId, run.id), eq(workflowScheduleOccurrences.workspaceId, run.workspaceId)))
     .limit(1);
-  if (!occurrence) throw new AppError("WORKFLOW_PRINCIPAL_MISSING", 500, "The scheduled workflow run has no execution principal.");
-  return workspaceAutomationPrincipal(occurrence.workspaceId, occurrence.scheduleId);
+  if (occurrence) return workspaceAutomationPrincipal(occurrence.workspaceId, occurrence.scheduleId);
+  const [event] = await db.select({ id: workflowWebhookEvents.id, triggerId: workflowWebhookEvents.triggerId, workspaceId: workflowWebhookEvents.workspaceId })
+    .from(workflowWebhookEvents)
+    .where(and(eq(workflowWebhookEvents.workflowRunId, run.id), eq(workflowWebhookEvents.workspaceId, run.workspaceId)))
+    .limit(1);
+  if (!event) throw new AppError("WORKFLOW_PRINCIPAL_MISSING", 500, "The automation workflow run has no execution principal.");
+  const [trigger] = await db.select({ id: workflowWebhookTriggers.id, workspaceId: workflowWebhookTriggers.workspaceId })
+    .from(workflowWebhookTriggers)
+    .where(and(eq(workflowWebhookTriggers.id, event.triggerId), eq(workflowWebhookTriggers.workspaceId, event.workspaceId)))
+    .limit(1);
+  if (!trigger) throw new AppError("WORKFLOW_PRINCIPAL_MISSING", 500, "The webhook workflow run trigger is invalid.");
+  return webhookAutomationPrincipal(event.workspaceId, trigger.id, event.id);
 }
 
 export async function cancelWorkflowRun(userId: string, runId: string, db: Database = getDatabase()): Promise<WorkflowRun> {

@@ -39,6 +39,16 @@ Durable workflow output is schema-controlled JSON separate from safe observabili
 - Scheduled workflow runs use a verified workspace automation principal, never a fake user. startedBy, generation log user IDs, subordinate agent starter IDs, and scheduler audit actors remain nullable for automation.
 - Scheduled AI/Agent execution reuses the existing LLMProvider, BrandContext/RAG, and deny-by-default AgentRunner. Client input cannot choose a schedule principal, workspace, user, provider endpoint, model, tool, SQL query, shell command, filesystem path, or arbitrary HTTP target.
 
+## Webhook security
+
+- Webhook public IDs are generated from 32 cryptographically secure random bytes and are not credentials. The secret is generated separately, encrypted at rest with versioned AES-256-GCM, and returned only once on create/rotate.
+- Public delivery requires `X-Flowyn-Timestamp` and `X-Flowyn-Signature: v1=<hex HMAC-SHA256>`. The signed message is the exact timestamp plus raw body bytes; verification uses a constant-time digest comparison and a bounded replay window.
+- Raw bodies, JSON inputs, event IDs, nested values, content lengths, and history pages are bounded. JSON roots must be objects and the final input is validated by the existing workflow run schema. Reserved workspace/user/workflow/principal/role/tool/model/endpoint/control fields cannot select execution capabilities.
+- Redis provides global and per-trigger admission limits and public ingress fails closed if Redis is unavailable. PostgreSQL remains authoritative for event deduplication, duplicate updates, event retention, workflow runs, and outbox dispatch.
+- The public request may address only the configured trigger. It cannot choose a workspace, user, workflow, role, principal, agent, tool, model, endpoint, SQL, shell, filesystem, code, or outbound request. It never directly executes a workflow or calls Ollama.
+- Event history and audit logs store only safe identifiers, hashes, sizes, status, reason codes, duplicate counts, and run links. Raw bodies, headers, signatures, and secret material are not persisted. Existing bounded workflow input history remains workspace data; senders must not include credentials in webhook payloads.
+- Webhook automation reuses the existing non-forgeable workspace automation principal with a trigger/event origin, the existing workflow snapshot/outbox/BullMQ/worker path, and the same AgentRunner, RAG, and LLMProvider boundaries. No fake user or second execution engine exists.
+
 ## Credential handling
 
 Never commit `.env.local`, database passwords, or provider secrets. The Compose defaults are development-only values. Replace `BETTER_AUTH_SECRET` before using a shared development machine.
@@ -54,7 +64,7 @@ A resource ID is not an authorization decision. A protected service must:
 
 ## Deferred controls
 
-SSRF protection, encrypted integration credentials, rate limiting, CSRF policy review, file validation, webhook authentication, safe expression evaluation, and approval gates belong to later milestones because those surfaces do not exist yet. They must be implemented before HTTP tools, uploads, webhooks, or external integrations are enabled.
+SSRF protection, encrypted integration credentials, CSRF policy review, file validation, safe expression evaluation, and approval gates belong to later milestones because those surfaces do not exist yet. They must be implemented before HTTP tools, uploads, or external integrations are enabled.
 
 ## Local AI boundary
 

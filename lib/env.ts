@@ -43,6 +43,14 @@ const envSchema = z.object({
   SCHEDULE_MISFIRE_GRACE_SECONDS: z.coerce.number().int().nonnegative().max(86400).default(60),
   SCHEDULE_MIN_INTERVAL_SECONDS: z.coerce.number().int().positive().max(31536000).default(60),
   SCHEDULE_MAX_INTERVAL_SECONDS: z.coerce.number().int().positive().max(31536000).default(31536000),
+  WEBHOOK_SECRET_ENCRYPTION_KEY: z.string().min(1).default("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+  WEBHOOK_SECRET_KEY_VERSION: z.string().regex(/^[A-Za-z0-9._-]{1,32}$/).default("v1"),
+  WEBHOOK_REPLAY_WINDOW_SECONDS: z.coerce.number().int().positive().max(86400).default(300),
+  WEBHOOK_MAX_BODY_BYTES: z.coerce.number().int().positive().max(262144).default(262144),
+  WEBHOOK_RATE_LIMIT_GLOBAL_PER_MINUTE: z.coerce.number().int().positive().max(100000).default(600),
+  WEBHOOK_RATE_LIMIT_TRIGGER_PER_MINUTE: z.coerce.number().int().positive().max(100000).default(120),
+  WEBHOOK_EVENT_RETENTION_DAYS: z.coerce.number().int().positive().max(365).default(30),
+  WEBHOOK_PUBLIC_BASE_URL: z.string().url().default("http://localhost:3000"),
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

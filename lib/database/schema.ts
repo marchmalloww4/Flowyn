@@ -244,6 +244,7 @@ export type WorkflowDispatchStatus = "PENDING" | "CLAIMED" | "DISPATCHED" | "FAI
 export type WorkflowScheduleType = "CRON" | "INTERVAL" | "ONE_TIME";
 export type WorkflowScheduleMisfirePolicy = "SKIP" | "FIRE_ONCE";
 export type WorkflowScheduleOccurrenceStatus = "TRIGGERED" | "SKIPPED" | "FAILED";
+export type WorkflowWebhookEventStatus = "TRIGGERED" | "SKIPPED" | "FAILED";
 
 export const workflows = pgTable("workflows", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -354,6 +355,58 @@ export const workflowScheduleOccurrences = pgTable("workflow_schedule_occurrence
   statusCheck: check("workflow_schedule_occurrences_status_check", sql`${table.status} in ('TRIGGERED', 'SKIPPED', 'FAILED')`),
 }));
 
+export const workflowWebhookTriggers = pgTable("workflow_webhook_triggers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  workflowId: uuid("workflow_id").notNull().references(() => workflows.id, { onDelete: "cascade" }),
+  publicId: text("public_id").notNull(),
+  name: text("name").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  secretCiphertext: text("secret_ciphertext").notNull(),
+  secretKeyVersion: text("secret_key_version").notNull(),
+  secretVersion: integer("secret_version").notNull().default(1),
+  createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+  ...timestamps,
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+}, (table) => ({
+  publicIdIdx: uniqueIndex("workflow_webhook_triggers_public_id_idx").on(table.publicId),
+  workspaceIdx: index("workflow_webhook_triggers_workspace_idx").on(table.workspaceId),
+  workflowIdx: index("workflow_webhook_triggers_workflow_idx").on(table.workflowId),
+  enabledIdx: index("workflow_webhook_triggers_enabled_idx").on(table.enabled, table.deletedAt),
+  secretVersionCheck: check("workflow_webhook_triggers_secret_version_check", sql`${table.secretVersion} > 0`),
+}));
+
+export const workflowWebhookEvents = pgTable("workflow_webhook_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  triggerId: uuid("trigger_id").notNull().references(() => workflowWebhookTriggers.id, { onDelete: "cascade" }),
+  externalEventIdHash: text("external_event_id_hash"),
+  dedupeKey: text("dedupe_key").notNull(),
+  dedupeWindowStart: timestamp("dedupe_window_start", { withTimezone: true }),
+  payloadSha256: text("payload_sha256").notNull(),
+  payloadBytes: integer("payload_bytes").notNull(),
+  contentType: text("content_type").notNull(),
+  secretVersion: integer("secret_version").notNull(),
+  status: text("status").$type<WorkflowWebhookEventStatus>().notNull(),
+  reasonCode: text("reason_code"),
+  workflowRunId: uuid("workflow_run_id").references(() => workflowRuns.id, { onDelete: "set null" }),
+  receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+  duplicateCount: integer("duplicate_count").notNull().default(0),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+}, (table) => ({
+  dedupeIdx: uniqueIndex("workflow_webhook_events_trigger_dedupe_idx").on(table.triggerId, table.dedupeKey),
+  workspaceReceivedIdx: index("workflow_webhook_events_workspace_received_idx").on(table.workspaceId, table.receivedAt),
+  triggerReceivedIdx: index("workflow_webhook_events_trigger_received_idx").on(table.triggerId, table.receivedAt),
+  workflowRunIdx: index("workflow_webhook_events_workflow_run_idx").on(table.workflowRunId),
+  expiresIdx: index("workflow_webhook_events_expires_idx").on(table.expiresAt),
+  payloadBytesCheck: check("workflow_webhook_events_payload_bytes_check", sql`${table.payloadBytes} > 0`),
+  duplicateCountCheck: check("workflow_webhook_events_duplicate_count_check", sql`${table.duplicateCount} >= 0`),
+  secretVersionCheck: check("workflow_webhook_events_secret_version_check", sql`${table.secretVersion} > 0`),
+  statusCheck: check("workflow_webhook_events_status_check", sql`${table.status} in ('TRIGGERED', 'SKIPPED', 'FAILED')`),
+}));
+
 export const workflowStepRuns = pgTable("workflow_step_runs", {
   id: uuid("id").defaultRandom().primaryKey(),
   workflowRunId: uuid("workflow_run_id").notNull().references(() => workflowRuns.id, { onDelete: "cascade" }),
@@ -458,6 +511,8 @@ export const workspaceRelations = relations(workspaces, ({ many }) => ({
   workflowStepRuns: many(workflowStepRuns),
   workflowSchedules: many(workflowSchedules),
   workflowScheduleOccurrences: many(workflowScheduleOccurrences),
+  workflowWebhookTriggers: many(workflowWebhookTriggers),
+  workflowWebhookEvents: many(workflowWebhookEvents),
 }));
 
 export const brandRelations = relations(brands, ({ one, many }) => ({
@@ -495,6 +550,7 @@ export const workflowRelations = relations(workflows, ({ one, many }) => ({
   versions: many(workflowVersions),
   runs: many(workflowRuns),
   schedules: many(workflowSchedules),
+  webhookTriggers: many(workflowWebhookTriggers),
 }));
 
 export const workflowVersionRelations = relations(workflowVersions, ({ one, many }) => ({
@@ -512,6 +568,7 @@ export const workflowRunRelations = relations(workflowRuns, ({ one, many }) => (
   steps: many(workflowStepRuns),
   dispatch: one(workflowRunDispatches),
   scheduleOccurrences: many(workflowScheduleOccurrences),
+  webhookEvents: many(workflowWebhookEvents),
 }));
 
 export const workflowScheduleRelations = relations(workflowSchedules, ({ one, many }) => ({
@@ -525,6 +582,19 @@ export const workflowScheduleOccurrenceRelations = relations(workflowScheduleOcc
   workspace: one(workspaces, { fields: [workflowScheduleOccurrences.workspaceId], references: [workspaces.id] }),
   schedule: one(workflowSchedules, { fields: [workflowScheduleOccurrences.scheduleId], references: [workflowSchedules.id] }),
   workflowRun: one(workflowRuns, { fields: [workflowScheduleOccurrences.workflowRunId], references: [workflowRuns.id] }),
+}));
+
+export const workflowWebhookTriggerRelations = relations(workflowWebhookTriggers, ({ one, many }) => ({
+  workspace: one(workspaces, { fields: [workflowWebhookTriggers.workspaceId], references: [workspaces.id] }),
+  workflow: one(workflows, { fields: [workflowWebhookTriggers.workflowId], references: [workflows.id] }),
+  creator: one(user, { fields: [workflowWebhookTriggers.createdBy], references: [user.id] }),
+  events: many(workflowWebhookEvents),
+}));
+
+export const workflowWebhookEventRelations = relations(workflowWebhookEvents, ({ one }) => ({
+  workspace: one(workspaces, { fields: [workflowWebhookEvents.workspaceId], references: [workspaces.id] }),
+  trigger: one(workflowWebhookTriggers, { fields: [workflowWebhookEvents.triggerId], references: [workflowWebhookTriggers.id] }),
+  workflowRun: one(workflowRuns, { fields: [workflowWebhookEvents.workflowRunId], references: [workflowRuns.id] }),
 }));
 
 export const workflowStepRunRelations = relations(workflowStepRuns, ({ one }) => ({
@@ -570,6 +640,8 @@ export const schema = {
   workflowRuns,
   workflowSchedules,
   workflowScheduleOccurrences,
+  workflowWebhookTriggers,
+  workflowWebhookEvents,
   workflowStepRuns,
   workflowRunDispatches,
   knowledgeDocuments,

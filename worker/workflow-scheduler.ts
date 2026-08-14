@@ -1,7 +1,8 @@
 import { startWorkflowScheduler } from "@/lib/schedules/scheduler";
+import { purgeExpiredWebhookEvents } from "@/lib/webhooks/repository";
 
 async function main() {
-  const runtime = await startWorkflowScheduler();
+  const runtime = await startWorkflowScheduler({ cleanup: () => purgeExpiredWebhookEvents() });
   const close = async () => {
     await runtime.close();
     process.exit(0);

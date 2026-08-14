@@ -14,6 +14,11 @@ describe("workspace authorization policy", () => {
     ["MEMBER", "brand.read", true],
     ["MEMBER", "brand.write", false],
     ["MEMBER", "membership.manage", false],
+    ["OWNER", "workflow_webhook.rotate_secret", true],
+    ["ADMIN", "workflow_webhook.create", true],
+    ["MEMBER", "workflow_webhook.read", true],
+    ["MEMBER", "workflow_webhook.create", false],
+    ["MEMBER", "workflow_webhook.rotate_secret", false],
   ];
 
   it.each(cases)("returns %s for %s as %s", (role, action, expected) => {

@@ -11,6 +11,7 @@ export interface WorkflowSchedulerOptions {
   batchSize?: number;
   heartbeatTtlSeconds?: number;
   process?: (options: { batchSize: number }) => Promise<ScheduleProcessingMetrics>;
+  cleanup?: () => Promise<number>;
 }
 export interface WorkflowSchedulerRuntime {
   close(): Promise<void>;
@@ -55,6 +56,17 @@ export async function startWorkflowScheduler(options: WorkflowSchedulerOptions =
     try {
       const metrics = await processBatch({ batchSize });
       await refreshHeartbeat();
+      if (options.cleanup) {
+        try {
+          await options.cleanup();
+        } catch (error) {
+          console.error(JSON.stringify({
+            event: "workflow_scheduler.maintenance_failed",
+            schedulerId,
+            error: error instanceof Error ? error.name : "UnknownError",
+          }));
+        }
+      }
       logMetrics(schedulerId, metrics, Math.max(0, Math.round(performance.now() - startedAt)));
     } catch (error) {
       console.error(JSON.stringify({
