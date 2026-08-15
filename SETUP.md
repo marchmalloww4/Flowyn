@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Docker Desktop with Compose v2.
-- Node.js 20.9 or newer.
+- Node.js 22.23.1 or newer (the repository engine floor).
 - At least 8 GB of free disk space for local images and Ollama models.
 - Enough memory for the selected Ollama model.
 
@@ -150,6 +150,21 @@ docker compose --env-file .env.production -f docker-compose.production.yml up -d
 ```
 
 PostgreSQL, Redis, and Ollama have no public host ports in this topology. Do not copy `.env.production` into Git, reset development volumes, or use `db:push`. Read the deployment, migration, and backup/restore runbooks before a release.
+
+## Milestone 14 browser and accessibility checks
+
+Install the pinned browser test dependencies with `npm install`. Install Chromium once with `npx playwright install chromium`. The browser suite starts a local Next.js server when `E2E_DATABASE_URL` is set:
+
+```powershell
+$env:E2E_DATABASE_URL = "postgres://flowyn:flowyn@localhost:5432/flowyn_m14_e2e"
+npm run test:e2e
+```
+
+Use a disposable database for this command. Apply the existing Drizzle migrations to it before the run, and drop only that explicitly named temporary database afterward. Do not point E2E at the development database when tests create users or workspaces. `E2E_BASE_URL` may be used to target an already-running local server instead.
+
+The suite checks keyboard-visible focus, semantic navigation, responsive layouts at 375px, 768px, and 1280px, bounded authenticated surfaces, and representative axe-core results. It does not run real Slack egress, require OAuth, upload files, execute browser automation inside Flowyn, or expose credentials to the browser. The integrations panel only verifies safe credential metadata and uses synthetic test input when exercised.
+
+M14 adds no database migration. It preserves the existing auth, authorization, workflow, scheduler, webhook, approval, integration, usage, and readiness contracts. M15 items such as billing, marketplace capabilities, arbitrary connectors, OAuth, generic HTTP, uploads, and browser automation remain excluded.
 
 Milestone 12 resolves every workspace to the local `SELF_HOSTED` policy. Initial limits are enforced server-side: 30 AI generations per minute and 500 per day; 2 concurrent agents and 120 agent runs per day; 10 concurrent workflows, 60 workflow starts per minute and 1,000 per day; 300 newly accepted webhooks per minute; 50 active schedules; 100 knowledge documents and 10,000,000 knowledge characters; 20 integration credentials; and 2 concurrent integration actions, 30 per minute, and 300 per day.
 

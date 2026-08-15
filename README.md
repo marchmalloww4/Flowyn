@@ -2,7 +2,7 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1 through 12**:
+This repository currently contains **Milestones 1 through 14**:
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -22,6 +22,7 @@ This repository currently contains **Milestones 1 through 12**:
 - A server-validated visual workflow editor that projects the existing seven-step workflow definition into a React Flow canvas, persists layout separately, supports Advanced JSON round-tripping, and rejects stale saves with optimistic `currentVersionId` concurrency.
 - A workspace-isolated encrypted integration credential vault, static Slack `post_message` connector, fixed-target bounded egress, approval-aware `INTEGRATION_ACTION` workflow step, PostgreSQL-authoritative idempotent action state, safe recovery semantics, and protected credential-management APIs.
 - Production hardening with server-resolved SELF_HOSTED usage limits, PostgreSQL-authoritative quota admission and concurrency leases, bounded Redis rate limiting, workflow dispatch deferral, correlation-safe structured logging, readiness diagnostics, bounded retention cleanup, workspace operations projections, and production configuration validation.
+- Product experience hardening with a responsive workspace shell, workspace switching, onboarding guidance, safe loading/error/empty states, accessible management surfaces, mobile layouts, server-backed feature panels, and browser/accessibility verification across the authenticated product.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, Ollama behavior, agent policy, runner boundaries, protected APIs, and safe persistence.
 
 OAuth, generic HTTP, arbitrary outbound targets, billing, browser automation, file uploads, and general DAG or loop orchestration remain outside Milestone 12 and are intentionally deferred.
@@ -50,7 +51,7 @@ OAuth, generic HTTP, arbitrary outbound targets, billing, browser automation, fi
 
 Workspace, brand, agent, and run APIs are protected by the authenticated session. All workspace-owned reads and writes verify server-side membership and role. Agent runs are synchronous: `POST /api/agents/:id/runs` returns only after a terminal result, and cancellation is request-scoped rather than durable across requests.
 
-For full setup and troubleshooting, see [SETUP.md](SETUP.md). For architecture decisions, see [ARCHITECTURE.md](ARCHITECTURE.md).
+For full setup and troubleshooting, see [SETUP.md](SETUP.md). For architecture decisions, see [ARCHITECTURE.md](ARCHITECTURE.md). Browser QA conventions are documented in [docs/operations/browser-testing.md](docs/operations/browser-testing.md).
 
 The Compose worker service is independently startable and consumes durable workflow jobs. The scheduler service uses the same application image, PostgreSQL schedule truth, and a Redis heartbeat checked by npm run scheduler:health. No schedule truth is stored in BullMQ repeatable jobs.
 
@@ -75,7 +76,10 @@ npm run typecheck
 npm run lint
 npm test -- --run
 npm run build
+npm run test:e2e
 ```
+
+Milestone 14 browser tests use Playwright with a disposable PostgreSQL database when `E2E_DATABASE_URL` is provided. They create deterministic test users and workspace data through the authenticated UI or protected APIs, use no real integration credentials, and never enable Slack egress. Accessibility checks use axe-core on public and representative authenticated surfaces at desktop and mobile widths.
 
 When Docker Desktop is installed, run the complete local verification script:
 

@@ -28,13 +28,13 @@ export default function HomePage() {
           <div>
             <p className="mb-6 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-violet-700 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-200">
               <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
-              Milestone 1 foundation
+              Local-first automation workspace
             </p>
             <h1 className="max-w-3xl text-5xl font-semibold tracking-[-0.06em] text-slate-950 sm:text-7xl dark:text-white">
               Business automation with a local AI core.
             </h1>
             <p className="mt-7 max-w-xl text-lg leading-8 text-slate-600 dark:text-slate-300">
-              Flowyn is being built as an agentic workforce for repeatable business workflows. This first slice establishes the local runtime, tenant boundary, and Ollama connection.
+              Flowyn brings workspace context, brand knowledge, controlled AI, agents, and durable workflows into one focused operating surface.
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
               <Link href="/sign-up">
@@ -53,7 +53,7 @@ export default function HomePage() {
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Flowyn runtime</p>
                   <p className="mt-2 text-lg font-semibold">Local readiness</p>
                 </div>
-                <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-300">foundation</span>
+                <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-300">ready locally</span>
               </div>
               <div className="space-y-4 py-6">
                 {["Next.js application", "PostgreSQL data layer", "Redis runtime", "Ollama provider"].map((item) => (
@@ -64,7 +64,7 @@ export default function HomePage() {
                 ))}
               </div>
               <div className="rounded-xl border border-violet-400/20 bg-violet-400/10 p-4 text-sm leading-6 text-violet-100">
-                The automation canvas and agents come next. This surface is intentionally limited to the verified local foundation.
+                Start with a workspace and brand, then move from knowledge and AI experiments to governed agents and durable workflow runs.
               </div>
             </div>
           </div>

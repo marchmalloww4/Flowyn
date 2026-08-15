@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
+    "test:e2e": "playwright test",
     "test:watch": "vitest --watch",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx lib/database/migrate.ts",
@@ -40,7 +41,9 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
     "@eslint/eslintrc": "^3.3.1",
+    "@playwright/test": "1.61.1",
     "@tailwindcss/postcss": "^4.1.8",
     "@types/node": "^22.15.30",
     "@types/react": "^19.1.2",

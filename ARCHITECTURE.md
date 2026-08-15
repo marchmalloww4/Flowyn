@@ -1,5 +1,13 @@
 # Architecture
 
+## Milestone 14 product boundary
+
+Milestone 14 improves the product experience without changing the durable domain state machine. The authenticated dashboard is a responsive shell around the existing protected routes. Workspace selection is client context only: every API request still sends a workspace identifier that is re-authorized server-side. Feature panels use typed client state, bounded request lifetimes, safe error mapping, and existing route/service contracts. No browser state is treated as authorization.
+
+The workspace shell exposes Overview, Brands, Knowledge, AI, Agents, Workflows, Schedules, Webhooks, Approvals, Integrations, Usage / Operations, and Workspace / Settings. Onboarding is a derived checklist from safe server projections; dismissal is local presentation state and cannot grant access or change readiness. Loading, empty, error, and paused states are explicit and use text plus semantic status, not color alone.
+
+The workflow editor keeps the existing server-validated definition and optimistic version token. Its canvas is client-only and dynamically loaded; the accessible step list remains available while the canvas loads. Layout is still metadata-only and executable definitions still pass the existing workflow validator. M14 does not add schema changes or new workflow steps.
+
 ## Milestone 10 boundary
 
 Flowyn is intentionally a modular monolith. Milestones 1 through 4 establish the runtime, authentication, tenant boundary, role-aware membership management, brand foundation, audit trail, provider-agnostic local AI, verified local embeddings, pgvector knowledge, and bounded RAG—not the eventual automation engine.
@@ -62,6 +70,12 @@ graph TD
 - `lib/security`: application error envelope and validation-safe responses.
 
 Business logic belongs in these modules, not in React components.
+
+## Product experience and browser verification
+
+Shared UI primitives live under `components/ui` and include status badges, empty states, skeletons, inline alerts, form fields, confirmation dialogs, live regions, progress indicators, and responsive lists. Client state helpers under `lib/client` normalize safe API errors, derive onboarding/status state, and keep workspace changes isolated from stale requests. Feature pages under `components/dashboard` reuse the existing API contracts and authorization semantics.
+
+Playwright tests live under `tests/e2e`. The suite covers public/auth smoke checks, responsive overflow, representative authenticated routes, and axe-core scans. E2E runs must use a disposable database selected with `E2E_DATABASE_URL`; the existing development database is verified separately and is never reset by the test suite. Test credentials and integration tokens are synthetic, and `INTEGRATION_EGRESS_ENABLED` remains false.
 
 ## Durable workflow execution
 
