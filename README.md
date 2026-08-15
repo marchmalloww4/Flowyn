@@ -2,7 +2,9 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository currently contains **Milestones 1 through 14**:
+This repository contains the completed **Milestones 1 through 15**. M15 is the
+final project milestone and is a release-candidate and beta-validation milestone;
+it does not add a new product capability.
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.
@@ -25,11 +27,11 @@ This repository currently contains **Milestones 1 through 14**:
 - Product experience hardening with a responsive workspace shell, workspace switching, onboarding guidance, safe loading/error/empty states, accessible management surfaces, mobile layouts, server-backed feature panels, and browser/accessibility verification across the authenticated product.
 - Vitest coverage for health probes, schema contracts, input validation, workspace isolation, Ollama behavior, agent policy, runner boundaries, protected APIs, and safe persistence.
 
-OAuth, generic HTTP, arbitrary outbound targets, billing, browser automation, file uploads, and general DAG or loop orchestration remain outside Milestone 12 and are intentionally deferred.
+OAuth, generic HTTP, arbitrary outbound targets, billing, browser automation, file uploads, and general DAG or loop orchestration remain outside the current v1.0 RC scope. These restrictions are intentional product and security boundaries.
 
 ## Quick start
 
-1. Install Node.js 20.9+ and Docker Desktop.
+1. Install Node.js 22.23.1+ and Docker Desktop.
 2. Copy `.env.example` to `.env.local` and change `BETTER_AUTH_SECRET`.
 3. Install dependencies with `npm install`.
 4. Start local infrastructure with `docker compose up -d`.
@@ -130,6 +132,18 @@ tests/               Vitest tests
 scripts/             Local verification helpers
 docker-compose.yml   Local PostgreSQL, Redis, Ollama, app, worker, and scheduler services
 ```
+
+## Supervisor / Project Evaluation
+
+The supervisor-facing package is documented in:
+
+- [Supervisor submission](docs/SUPERVISOR-SUBMISSION.md)
+- [Supervisor demonstration guide](docs/SUPERVISOR-DEMO.md)
+- [Supervisor submission checklist](docs/SUPERVISOR-CHECKLIST.md)
+
+The qualified application release candidate is `v1.0.0-rc.1` at commit `273346d`.
+The controlled beta and final `v1.0.0` release remain separate operational decisions;
+this repository does not claim an external production deployment or completed beta.
 
 ## License
 
