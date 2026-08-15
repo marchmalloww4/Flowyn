@@ -1,12 +1,10 @@
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { getDatabase, getSql } from "@/lib/database";
+import { logError } from "@/lib/observability/logger";
 import { startRuntime } from "@/lib/runtime/startup";
+import { MIGRATION_ADVISORY_LOCK_KEY } from "@/lib/database/migration-constants";
 
-export const MIGRATION_ADVISORY_LOCK_KEY = 7130413;
-
-export function migrationLockSql(action: "lock" | "unlock"): string {
-  return action === "lock" ? "select pg_advisory_lock($1)" : "select pg_advisory_unlock($1)";
-}
+export { MIGRATION_ADVISORY_LOCK_KEY, migrationLockSql } from "@/lib/database/migration-constants";
 
 export async function migrateDatabase(): Promise<void> {
   const sql = getSql();
@@ -26,6 +24,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error("Database migration failed", error);
+  logError("database.migration_failed", error);
   process.exitCode = 1;
 });

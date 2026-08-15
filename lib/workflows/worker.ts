@@ -8,6 +8,7 @@ import { WORKFLOW_QUEUE_NAME, type WorkflowJobData } from "@/lib/workflows/queue
 import type { WorkflowStepRegistry } from "@/lib/workflows/registry";
 import { runWithCorrelationId } from "@/lib/observability/correlation";
 import { getEnv } from "@/lib/env";
+import { logError } from "@/lib/observability/logger";
 
 export const HEARTBEAT_PREFIX = "flowyn:worker:heartbeat:";
 const HEARTBEAT_TTL_SECONDS = 30;
@@ -46,7 +47,7 @@ export async function startWorkflowWorker(options: Partial<WorkflowWorkerOptions
         await Promise.race([worker.close(), new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Worker drain timed out.")), getEnv().RUNTIME_SHUTDOWN_TIMEOUT_MS))]);
         drained = true;
       } catch (error) {
-        console.error(JSON.stringify({ event: "workflow_worker.drain_failed", workerId, error: error instanceof Error ? error.name : "UnknownError" }));
+        logError("workflow_worker.drain_failed", error, { workerId });
       }
       const current = await connection.get(heartbeatKey);
       if (drained && current === workerId) await connection.del(heartbeatKey);

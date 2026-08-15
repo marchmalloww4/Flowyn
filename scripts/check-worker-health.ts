@@ -26,7 +26,7 @@ async function main() {
       console.log(`Workflow worker heartbeat is healthy: ${healthy.workerId} (${healthy.ttl}s remaining).`);
     }
   } catch (error) {
-    console.error("Workflow worker heartbeat check failed.", error instanceof Error ? error.message : "unknown error");
+    console.error("Workflow worker heartbeat check failed.", error instanceof Error ? error.name : "UnknownError");
     process.exitCode = 1;
   } finally {
     client.disconnect();

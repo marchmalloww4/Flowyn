@@ -1,5 +1,7 @@
 name: flowyn-production
 
+x-flowyn-image: &flowyn-image "${FLOWYN_IMAGE:?FLOWYN_IMAGE must be set}"
+
 x-flowyn-environment: &flowyn-environment
   NODE_ENV: production
   NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL must be set}
@@ -55,10 +57,8 @@ x-flowyn-environment: &flowyn-environment
 
 services:
   migrator:
-    build:
-      context: .
-      dockerfile: docker/production.Dockerfile
-    command: ["npm", "run", "db:migrate"]
+    image: *flowyn-image
+    command: ["node", "--import", "tsx", "lib/database/migrate.ts"]
     environment: *flowyn-environment
     depends_on:
       postgres:
@@ -67,9 +67,7 @@ services:
     networks: [private]
 
   app:
-    build:
-      context: .
-      dockerfile: docker/production.Dockerfile
+    image: *flowyn-image
     environment:
       <<: *flowyn-environment
       HOSTNAME: 0.0.0.0
@@ -99,10 +97,8 @@ services:
       start_period: 20s
 
   worker:
-    build:
-      context: .
-      dockerfile: docker/production.Dockerfile
-    command: ["npm", "run", "worker"]
+    image: *flowyn-image
+    command: ["node", "--import", "tsx", "worker/workflow-worker.ts"]
     environment: *flowyn-environment
     depends_on:
       migrator:
@@ -117,19 +113,19 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-    networks: [private]
+    networks:
+      - private
+      - egress
     healthcheck:
-      test: ["CMD-SHELL", "npm run worker:health"]
+      test: ["CMD-SHELL", "node --import tsx scripts/check-worker-health.ts"]
       interval: 10s
       timeout: 15s
       retries: 10
       start_period: 20s
 
   scheduler:
-    build:
-      context: .
-      dockerfile: docker/production.Dockerfile
-    command: ["npm", "run", "scheduler"]
+    image: *flowyn-image
+    command: ["node", "--import", "tsx", "worker/workflow-scheduler.ts"]
     environment: *flowyn-environment
     depends_on:
       migrator:
@@ -144,7 +140,7 @@ services:
       - /tmp
     networks: [private]
     healthcheck:
-      test: ["CMD-SHELL", "npm run scheduler:health"]
+      test: ["CMD-SHELL", "node --import tsx scripts/check-scheduler-health.ts"]
       interval: 10s
       timeout: 15s
       retries: 10
@@ -196,6 +192,9 @@ networks:
     internal: true
   ingress:
     driver: bridge
+  egress:
+    name: ${FLOWYN_WORKER_EGRESS_NETWORK:?FLOWYN_WORKER_EGRESS_NETWORK must be set}
+    external: true
 
 volumes:
   flowyn-production-postgres-data:

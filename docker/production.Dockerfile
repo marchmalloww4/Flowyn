@@ -27,7 +27,16 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN addgroup --system --gid 1001 flowyn && adduser --system --uid 1001 flowyn
 COPY --from=builder /app/package.json /app/package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts \
+    && rm -rf \
+      node_modules/drizzle-kit \
+      node_modules/@drizzle-team \
+      node_modules/@esbuild-kit \
+      node_modules/esbuild \
+      node_modules/@esbuild \
+    && test -d node_modules/tsx \
+    && npm cache clean --force \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=builder --chown=flowyn:flowyn /app/.next/standalone ./
 COPY --from=builder --chown=flowyn:flowyn /app/.next/static ./.next/static
 COPY --from=builder --chown=flowyn:flowyn /app/lib ./lib

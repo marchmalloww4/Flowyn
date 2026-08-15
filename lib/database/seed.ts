@@ -1,4 +1,5 @@
 import { getDatabase, closeDatabase, user, workspaces, workspaceMembers, brands } from "@/lib/database";
+import { logError } from "@/lib/observability/logger";
 
 async function seedDatabase(): Promise<void> {
   const db = getDatabase();
@@ -17,7 +18,7 @@ async function seedDatabase(): Promise<void> {
 }
 
 seedDatabase().catch((error: unknown) => {
-  console.error("Database seed failed", error);
+  logError("database.seed_failed", error);
   process.exitCode = 1;
 }).finally(() => closeDatabase());
 

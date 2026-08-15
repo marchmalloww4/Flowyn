@@ -66,4 +66,5 @@ jobs:
           POSTGRES_USER: flowyn
           POSTGRES_PASSWORD: password
           POSTGRES_DB: flowyn
+          FLOWYN_WORKER_EGRESS_NETWORK: flowyn-ci-worker-egress
         run: docker compose -f docker-compose.production.yml config

@@ -31,9 +31,14 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
       - name: Record immutable artifact metadata
+        env:
+          IMAGE_REF: flowyn:${{ inputs.image_tag }}
+          SOURCE_COMMIT: ${{ github.sha }}
         run: |
-          docker image inspect flowyn:${{ inputs.image_tag }} --format '{{json .RepoDigests}}' > image-digest.json
-          printf 'commit=%s\nimage_tag=%s\n' "$GITHUB_SHA" "${{ inputs.image_tag }}" > release-metadata.txt
+          image_id="$(docker image inspect "$IMAGE_REF" --format '{{.Id}}')"
+          repo_digests="$(docker image inspect "$IMAGE_REF" --format '{{json .RepoDigests}}')"
+          printf '{"image_id":"%s","repo_digests":%s}\n' "$image_id" "$repo_digests" > image-digest.json
+          printf 'commit=%s\nimage_ref=%s\nimage_id=%s\n' "$SOURCE_COMMIT" "$IMAGE_REF" "$image_id" > release-metadata.txt
       - uses: actions/upload-artifact@v4
         with:
           name: flowyn-release-${{ github.sha }}

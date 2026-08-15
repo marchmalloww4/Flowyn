@@ -8,6 +8,7 @@ import { getBrand, getBrandForWorkspace } from "@/lib/brands/service";
 import { getDatabase, type Database } from "@/lib/database";
 import { requireWorkspaceMember } from "@/lib/authz/authorization";
 import { getBrandContext, getBrandContextForPrincipal } from "@/lib/knowledge/brand-context";
+import { logError } from "@/lib/observability/logger";
 import { AppError } from "@/lib/security/errors";
 import { userExecutionPrincipal, type ExecutionPrincipal } from "@/lib/security/principal";
 import { admitAiGeneration } from "@/lib/usage/service";
@@ -119,7 +120,7 @@ async function safeRecordGenerationLog(input: Parameters<typeof recordGeneration
   try {
     await recordGenerationLog(input, db);
   } catch (error) {
-    console.error("Generation log persistence failed", error instanceof Error ? error.message : "unknown error");
+    logError("ai.generation_log_persistence_failed", error);
   }
 }
 

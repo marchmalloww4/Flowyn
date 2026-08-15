@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 
 export default function DashboardError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    console.error("Dashboard route error", error);
+    console.error("Dashboard route error", { name: error.name, digest: error.digest });
   }, [error]);
 
   return (

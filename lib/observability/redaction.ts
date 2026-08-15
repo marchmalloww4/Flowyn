@@ -1,4 +1,4 @@
-const sensitiveKey = /(password|token|secret|credential|api[-_]?key|access[-_]?token|refresh[-_]?token|authorization|cookie|prompt|response|body|signature|provider[-_]?payload|private[-_]?knowledge)/iu;
+const sensitiveKey = /(password|token|secret|credential|api[-_]?key|access[-_]?token|refresh[-_]?token|authorization|cookie|prompt|response|body|signature|provider[-_]?payload|private[-_]?knowledge|url|uri|dsn|connection[-_]?string|headers?)/iu;
 const MAX_DEPTH = 5;
 const MAX_ARRAY_LENGTH = 100;
 const MAX_STRING_LENGTH = 1000;

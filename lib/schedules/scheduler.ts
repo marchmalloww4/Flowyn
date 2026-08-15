@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getEnv } from "@/lib/env";
 import { createSchedulerConnection } from "@/lib/queue/connection";
 import { processDueSchedules, type ScheduleProcessingMetrics } from "@/lib/schedules/processor";
+import { logError, logInfo } from "@/lib/observability/logger";
 
 export const SCHEDULER_HEARTBEAT_PREFIX = "flowyn:scheduler:heartbeat:";
 
@@ -22,15 +23,14 @@ export interface WorkflowSchedulerRuntime {
 }
 
 function logMetrics(schedulerId: string, metrics: ScheduleProcessingMetrics, durationMs: number): void {
-  console.log(JSON.stringify({
-    event: "workflow_scheduler.poll",
+  logInfo("workflow_scheduler.poll", {
     schedulerId,
     claimed: metrics.claimed,
     triggered: metrics.triggered,
     skipped: metrics.skipped,
     failed: metrics.failed,
     durationMs,
-  }));
+  });
 }
 
 export async function startWorkflowScheduler(options: WorkflowSchedulerOptions = {}): Promise<WorkflowSchedulerRuntime> {
@@ -65,20 +65,12 @@ export async function startWorkflowScheduler(options: WorkflowSchedulerOptions =
         try {
           await options.cleanup();
         } catch (error) {
-          console.error(JSON.stringify({
-            event: "workflow_scheduler.maintenance_failed",
-            schedulerId,
-            error: error instanceof Error ? error.name : "UnknownError",
-          }));
+          logError("workflow_scheduler.maintenance_failed", error, { schedulerId });
         }
       }
       logMetrics(schedulerId, metrics, Math.max(0, Math.round(performance.now() - startedAt)));
     } catch (error) {
-      console.error(JSON.stringify({
-        event: "workflow_scheduler.poll_failed",
-        schedulerId,
-        error: error instanceof Error ? error.name : "UnknownError",
-      }));
+      logError("workflow_scheduler.poll_failed", error, { schedulerId });
       try {
         await refreshHeartbeat();
       } catch {
@@ -105,7 +97,7 @@ export async function startWorkflowScheduler(options: WorkflowSchedulerOptions =
         await Promise.race([activePoll, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Scheduler drain timed out.")), getEnv().RUNTIME_SHUTDOWN_TIMEOUT_MS))]);
         drained = true;
       } catch (error) {
-        console.error(JSON.stringify({ event: "workflow_scheduler.drain_failed", schedulerId, error: error instanceof Error ? error.name : "UnknownError" }));
+        logError("workflow_scheduler.drain_failed", error, { schedulerId });
       }
       const current = await redis.get(heartbeatKey);
       if (drained && current === schedulerId) await redis.del(heartbeatKey);
