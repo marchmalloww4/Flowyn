@@ -6,6 +6,7 @@ const NONCE_BYTES = 12;
 const KEY_BYTES = 32;
 const ENVELOPE_VERSION = "flowyn-webhook-secret-v1";
 const INTEGRATION_ENVELOPE_VERSION = "flowyn-integration-secret-v1";
+const AI_IDEMPOTENCY_RESPONSE_ENVELOPE_VERSION = "flowyn-ai-idempotency-response-v1";
 
 export interface WebhookSecretContext {
   encryptionKey: Uint8Array;
@@ -111,5 +112,47 @@ export function decryptIntegrationSecret(envelope: string, context: IntegrationS
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
   } catch {
     throw integrationEnvelopeError();
+  }
+}
+
+export interface AiIdempotencyResponseContext {
+  keyring: ReadonlyMap<string, Uint8Array>;
+  currentKeyVersion: string;
+  workspaceId: string;
+  recordId: string;
+}
+
+function aiIdempotencyAssociatedData(context: AiIdempotencyResponseContext, keyVersion: string): Buffer {
+  return Buffer.from(`${AI_IDEMPOTENCY_RESPONSE_ENVELOPE_VERSION}:${keyVersion}:${context.workspaceId}:${context.recordId}`, "utf8");
+}
+
+export function encryptAiIdempotencyResponse(plaintext: string, context: AiIdempotencyResponseContext): string {
+  if (plaintext.length === 0 || plaintext.length > 64000) throw new Error("AI idempotency response is outside the supported bounds.");
+  const keyVersion = context.currentKeyVersion;
+  const key = Buffer.from(getSecretKey(context.keyring, keyVersion));
+  const nonce = randomBytes(NONCE_BYTES);
+  const cipher = createCipheriv(ALGORITHM, key, nonce);
+  cipher.setAAD(aiIdempotencyAssociatedData(context, keyVersion));
+  const ciphertext = Buffer.concat([cipher.update(Buffer.from(plaintext, "utf8")), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [AI_IDEMPOTENCY_RESPONSE_ENVELOPE_VERSION, keyVersion, encode(nonce), encode(ciphertext), encode(tag)].join(".");
+}
+
+export function decryptAiIdempotencyResponse(envelope: string, context: AiIdempotencyResponseContext): string {
+  const [version, keyVersion, encodedNonce, encodedCiphertext, encodedTag, extra] = envelope.split(".");
+  if (extra !== undefined || version !== AI_IDEMPOTENCY_RESPONSE_ENVELOPE_VERSION || !keyVersion || !encodedNonce || !encodedCiphertext || !encodedTag) throw new Error("AI idempotency response envelope is invalid.");
+  const nonce = decode(encodedNonce);
+  const ciphertext = decode(encodedCiphertext);
+  const tag = decode(encodedTag);
+  if (nonce.length !== NONCE_BYTES || tag.length !== 16) throw new Error("AI idempotency response envelope is invalid.");
+  try {
+    const decipher = createDecipheriv(ALGORITHM, Buffer.from(getSecretKey(context.keyring, keyVersion)), nonce);
+    decipher.setAAD(aiIdempotencyAssociatedData(context, keyVersion));
+    decipher.setAuthTag(tag);
+    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    if (plaintext.length === 0 || plaintext.length > 64000) throw new Error("AI idempotency response envelope is invalid.");
+    return plaintext;
+  } catch {
+    throw new Error("AI idempotency response envelope is invalid.");
   }
 }

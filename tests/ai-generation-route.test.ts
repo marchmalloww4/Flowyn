@@ -1,14 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { requireUser, prepareGeneration, generateText, streamText } = vi.hoisted(() => ({
+const { requireUser, prepareGeneration, generateText, streamText, beginAiIdempotency, completeAiIdempotency, idempotentUsage } = vi.hoisted(() => ({
   requireUser: vi.fn(),
   prepareGeneration: vi.fn(),
   generateText: vi.fn(),
   streamText: vi.fn(),
+  beginAiIdempotency: vi.fn(),
+  completeAiIdempotency: vi.fn(),
+  idempotentUsage: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session", () => ({ requireUser }));
 vi.mock("@/lib/ai/service", () => ({ prepareGeneration, generateText, streamText }));
+vi.mock("@/lib/ai/idempotency-service", () => ({ beginAiIdempotency, completeAiIdempotency, completeAiStreamIdempotency: vi.fn(), failAiIdempotency: vi.fn(), idempotentUsage }));
 
 import { POST } from "@/app/api/ai/generate/route";
 
@@ -16,6 +20,9 @@ const workspaceId = "11111111-1111-4111-8111-111111111111";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  beginAiIdempotency.mockResolvedValue({ kind: "NEW", recordId: "record-1", operationKeyHash: "hash-1" });
+  completeAiIdempotency.mockImplementation(async ({ result }: { result: unknown }) => result);
+  idempotentUsage.mockReturnValue({ operationKey: "direct-ai:hash-1", sourceType: "DIRECT_AI", sourceId: "record-1", correlationId: "corr" });
 });
 
 describe("AI generation route", () => {
@@ -28,7 +35,8 @@ describe("AI generation route", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ result: { text: "Hello", model: "llama3.2:3b" } });
-    expect(prepareGeneration).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1", workspaceId, prompt: "Say hello", usage: { operationKey: "direct-ai:request-1", sourceType: "DIRECT_AI", sourceId: "request-1", correlationId: expect.any(String) } }));
+    expect(prepareGeneration).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1", workspaceId, prompt: "Say hello" }));
+    expect(beginAiIdempotency).toHaveBeenCalledWith(expect.objectContaining({ workspaceId, operationKey: "request-1", mode: "SYNC" }));
   });
 
   it("rejects malformed requests before calling the generation service", async () => {

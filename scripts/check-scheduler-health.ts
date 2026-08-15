@@ -1,17 +1,29 @@
 import Redis from "ioredis";
 import { getEnv } from "@/lib/env";
-import { SCHEDULER_HEARTBEAT_KEY } from "@/lib/schedules/scheduler";
+import { getSchedulerHeartbeatKey, SCHEDULER_HEARTBEAT_PREFIX } from "@/lib/schedules/scheduler";
 
 async function main() {
-  const client = new Redis(getEnv().REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1, connectTimeout: 3000 });
+  const env = getEnv();
+  const client = new Redis(env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1, connectTimeout: env.REDIS_CONNECT_TIMEOUT_MS });
   try {
     await client.connect();
-    const [schedulerId, ttl] = await Promise.all([client.get(SCHEDULER_HEARTBEAT_KEY), client.ttl(SCHEDULER_HEARTBEAT_KEY)]);
-    if (!schedulerId || ttl <= 0) {
+    const configuredKey = env.SCHEDULER_INSTANCE_ID ? getSchedulerHeartbeatKey(env.SCHEDULER_INSTANCE_ID) : undefined;
+    let keys: string[] = configuredKey ? [configuredKey] : [];
+    if (!configuredKey) {
+      let cursor = "0";
+      do {
+        const [nextCursor, batch] = await client.scan(cursor, "MATCH", `${SCHEDULER_HEARTBEAT_PREFIX}*`, "COUNT", "100");
+        keys = [...keys, ...batch].slice(0, 100);
+        cursor = nextCursor;
+      } while (cursor !== "0" && keys.length < 100);
+    }
+    const statuses = await Promise.all(keys.map(async (key) => ({ key, schedulerId: await client.get(key), ttl: await client.ttl(key) })));
+    const healthy = statuses.find((status) => status.schedulerId && status.ttl > 0);
+    if (!healthy) {
       console.error("Workflow scheduler heartbeat is missing or stale.");
       process.exitCode = 1;
     } else {
-      console.log(`Workflow scheduler heartbeat is healthy: ${schedulerId} (${ttl}s remaining).`);
+      console.log(`Workflow scheduler heartbeat is healthy: ${healthy.schedulerId} (${healthy.ttl}s remaining).`);
     }
   } catch (error) {
     console.error("Workflow scheduler heartbeat check failed.", error instanceof Error ? error.message : "unknown error");

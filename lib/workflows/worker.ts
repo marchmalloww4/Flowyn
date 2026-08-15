@@ -7,9 +7,14 @@ import { getWorkflowExecutionPolicy } from "@/lib/workflows/policy";
 import { WORKFLOW_QUEUE_NAME, type WorkflowJobData } from "@/lib/workflows/queue";
 import type { WorkflowStepRegistry } from "@/lib/workflows/registry";
 import { runWithCorrelationId } from "@/lib/observability/correlation";
+import { getEnv } from "@/lib/env";
 
-const HEARTBEAT_KEY = "flowyn:worker:heartbeat";
+export const HEARTBEAT_PREFIX = "flowyn:worker:heartbeat:";
 const HEARTBEAT_TTL_SECONDS = 30;
+
+export function getWorkerHeartbeatKey(workerId: string): string {
+  return `${HEARTBEAT_PREFIX}${workerId.replace(/[^A-Za-z0-9._-]/gu, "_").slice(0, 64)}`;
+}
 
 export interface WorkflowWorkerOptions {
   workerId: string;
@@ -19,12 +24,13 @@ export interface WorkflowWorkerOptions {
 
 export async function startWorkflowWorker(options: Partial<WorkflowWorkerOptions> = {}): Promise<{ close(): Promise<void> }> {
   const policy = getWorkflowExecutionPolicy();
-  const workerId = options.workerId ?? `flowyn-worker-${process.pid}-${randomUUID().slice(0, 8)}`;
+  const workerId = options.workerId ?? getEnv().WORKER_INSTANCE_ID ?? `flowyn-worker-${process.pid}-${randomUUID().slice(0, 8)}`;
   const concurrency = options.concurrency ?? policy.workerConcurrency;
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32) throw new Error("Workflow worker concurrency is outside the allowed range.");
   const connection = createQueueWorkerConnection();
+  const heartbeatKey = getWorkerHeartbeatKey(workerId);
   const refreshHeartbeat = async () => {
-    await connection.set(HEARTBEAT_KEY, workerId, "EX", HEARTBEAT_TTL_SECONDS);
+    await connection.set(heartbeatKey, workerId, "EX", HEARTBEAT_TTL_SECONDS);
   };
   await refreshHeartbeat();
   const worker = new Worker<WorkflowJobData>(WORKFLOW_QUEUE_NAME, async (job) => runWithCorrelationId(job.data.correlationId ?? randomUUID(), () => executeWorkflowRun({ runId: job.data.runId, workerId, registry: options.registry, ...(job.data.reservationId && job.data.reservationOwnerId ? { dispatchHandoff: { reservationId: job.data.reservationId, reservationOwnerId: job.data.reservationOwnerId, generation: job.data.generation ?? 0, correlationId: job.data.correlationId } } : {}) })), { connection, concurrency });
@@ -35,12 +41,18 @@ export async function startWorkflowWorker(options: Partial<WorkflowWorkerOptions
     async close() {
       clearInterval(heartbeatTimer);
       clearInterval(dispatchTimer);
-      await worker.close();
-      const current = await connection.get(HEARTBEAT_KEY);
-      if (current === workerId) await connection.del(HEARTBEAT_KEY);
+      let drained = false;
+      try {
+        await Promise.race([worker.close(), new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Worker drain timed out.")), getEnv().RUNTIME_SHUTDOWN_TIMEOUT_MS))]);
+        drained = true;
+      } catch (error) {
+        console.error(JSON.stringify({ event: "workflow_worker.drain_failed", workerId, error: error instanceof Error ? error.name : "UnknownError" }));
+      }
+      const current = await connection.get(heartbeatKey);
+      if (drained && current === workerId) await connection.del(heartbeatKey);
       await connection.quit();
     },
   };
 }
 
-export { HEARTBEAT_KEY, HEARTBEAT_TTL_SECONDS };
+export { HEARTBEAT_TTL_SECONDS };

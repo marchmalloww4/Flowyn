@@ -15,7 +15,7 @@ const state = vi.hoisted(() => ({
 vi.mock("ioredis", () => ({ default: state.FakeRedis }));
 vi.mock("@/lib/schedules/processor", () => ({ processDueSchedules: state.process }));
 
-import { SCHEDULER_HEARTBEAT_KEY, startWorkflowScheduler } from "@/lib/schedules/scheduler";
+import { getSchedulerHeartbeatKey, startWorkflowScheduler } from "@/lib/schedules/scheduler";
 
 describe("workflow scheduler runtime", () => {
   beforeEach(() => {
@@ -27,10 +27,10 @@ describe("workflow scheduler runtime", () => {
     const runtime = await startWorkflowScheduler({ schedulerId: "scheduler-test", pollIntervalMs: 100, heartbeatTtlSeconds: 30, process: state.process });
 
     expect(state.process).toHaveBeenCalledWith({ batchSize: 25 });
-    expect(state.values.get(SCHEDULER_HEARTBEAT_KEY)).toBe("scheduler-test");
+    expect(state.values.get(getSchedulerHeartbeatKey("scheduler-test"))).toBe("scheduler-test");
 
     await runtime.close();
-    expect(state.values.has(SCHEDULER_HEARTBEAT_KEY)).toBe(false);
+    expect(state.values.has(getSchedulerHeartbeatKey("scheduler-test"))).toBe(false);
   });
 
   it("runs bounded webhook event cleanup as best-effort maintenance", async () => {

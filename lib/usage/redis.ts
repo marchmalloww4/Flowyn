@@ -1,15 +1,15 @@
 import Redis from "ioredis";
 import { getEnv } from "@/lib/env";
+import { getRedisConnectionOptions } from "@/lib/queue/connection";
 import type { WorkspaceRateLimitRedis } from "@/lib/usage/rate-limit";
 
 let connection: Redis | undefined;
 
 export function getUsageRateLimitRedis(): WorkspaceRateLimitRedis {
-  connection ??= new Redis(getEnv().REDIS_URL, {
+  const env = getEnv();
+  connection ??= new Redis(env.REDIS_URL, {
+    ...getRedisConnectionOptions(env, "probe"),
     lazyConnect: true,
-    maxRetriesPerRequest: 1,
-    enableReadyCheck: true,
-    connectTimeout: 3000,
   });
   return connection;
 }

@@ -75,6 +75,8 @@ SELECT 'integration_tables=' || (to_regclass('public.integration_credentials') I
 SELECT 'integration_constraints=' || (EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'integration_credentials_secret_version_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'integration_action_runs_status_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'integration_action_runs_attempt_check'));
 SELECT 'integration_indexes=' || (to_regclass('public.integration_credentials_workspace_name_idx') IS NOT NULL AND to_regclass('public.integration_action_runs_workspace_idempotency_idx') IS NOT NULL AND to_regclass('public.integration_action_runs_logical_action_idx') IS NOT NULL AND to_regclass('public.integration_action_runs_workflow_run_idx') IS NOT NULL);
 SELECT 'm12_correlation_fields=' || (EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'generation_logs' AND column_name = 'correlation_id') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'workflow_runs' AND column_name = 'correlation_id') AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'integration_action_runs' AND column_name = 'correlation_id'));
+SELECT 'm13_ai_idempotency=' || (to_regclass('public.ai_generation_idempotency') IS NOT NULL AND to_regclass('public.ai_generation_idempotency_workspace_operation_idx') IS NOT NULL AND to_regclass('public.ai_generation_idempotency_expires_idx') IS NOT NULL);
+SELECT 'm13_ai_idempotency_constraints=' || (EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ai_generation_idempotency_status_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ai_generation_idempotency_mode_check') AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ai_generation_idempotency_response_version_check'));
 "@
   $output = & $dockerCommand compose exec -T postgres psql -U flowyn -d $DatabaseName -Atc $query
   if ($LASTEXITCODE -ne 0) { throw "PostgreSQL schema inspection failed for database $DatabaseName." }
@@ -125,6 +127,8 @@ SELECT 'm12_correlation_fields=' || (EXISTS (SELECT 1 FROM information_schema.co
     "integration_constraints=true",
     "integration_indexes=true"
     ,"m12_correlation_fields=true"
+    ,"m13_ai_idempotency=true"
+    ,"m13_ai_idempotency_constraints=true"
   )
   foreach ($expected in $required) {
     if ($checks -notcontains $expected) { throw "PostgreSQL schema check failed for ${DatabaseName}: expected $expected, got $($checks -join ', ')." }
@@ -207,6 +211,7 @@ try {
 
   Write-Host "Applying PostgreSQL migrations..."
   Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "app", "npm", "run", "db:migrate")
+  Invoke-RequiredCommand $dockerCommand @("compose", "exec", "-T", "app", "npm", "run", "db:preflight")
   Assert-DatabaseSchema "flowyn" $verifiedEmbeddingDimension
 
   Write-Host "Applying migrations to a temporary clean database..."
@@ -260,7 +265,7 @@ try {
   Invoke-RequiredCommand $npmCommand @("test", "--", "--run")
   Invoke-RequiredCommand $npmCommand @("run", "build")
 
-  Write-Host "Milestone 12 local verification passed."
+  Write-Host "Milestone 13 local verification passed."
 } finally {
   if ($null -eq $previousRunOllamaIntegration) { Remove-Item Env:RUN_OLLAMA_INTEGRATION -ErrorAction SilentlyContinue }
   else { $env:RUN_OLLAMA_INTEGRATION = $previousRunOllamaIntegration }

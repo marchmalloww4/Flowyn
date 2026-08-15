@@ -31,7 +31,8 @@ describe("Milestone 12 bounded retention", () => {
     expect(result.scheduleOccurrences).toBe(2);
     expect(result.usageAdmissions).toBe(2);
     expect(result.concurrencyReservations).toBe(2);
-    expect(fixture.remove).toHaveBeenCalledTimes(4);
-    expect(fixture.deleted).toHaveLength(8);
+    expect(result.aiIdempotency).toBe(2);
+    expect(fixture.remove).toHaveBeenCalledTimes(5);
+    expect(fixture.deleted).toHaveLength(10);
   });
 });

@@ -66,6 +66,8 @@ Workflow editing uses the existing `/api/workflows/:id` GET/PATCH routes. GET re
 
 ## Verification
 
+Milestone 13 adds a separate production image and private-network Compose reference. Local `docker-compose.yml` remains the development path and its volumes are preserved. Production requires an externally managed environment file, HTTPS browser origin, private PostgreSQL/Redis/Ollama networking, a one-shot migrator, encrypted backups, and the operational runbooks in `docs/operations/`. It is not a high-availability or automatic deployment system.
+
 Run the local static checks:
 
 ```powershell

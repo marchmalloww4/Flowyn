@@ -74,6 +74,12 @@ Durable workflow output is schema-controlled JSON separate from safe observabili
 
 ## Credential handling
 
+## Milestone 13 production boundaries
+
+Production startup fails closed on placeholder secrets, insecure public origins, unsafe dependency transports, missing keyrings, and invalid runtime bounds. The production Compose reference exposes only the app loopback/edge path through a dedicated ingress network; the app also joins the private service network, while PostgreSQL, Redis, and Ollama remain private-only. Runtime logs and metrics use bounded labels and redact prompts, responses, bodies, tokens, credentials, URLs, and provider payloads.
+
+Migration execution is one-shot and advisory-locked. Backups and restore drills use explicitly isolated targets. Direct-AI replay material is encrypted with a purpose-specific keyring; matching keyrings are required for restore. Unresolved HIGH dependency findings block release unless a human-approved, time-bound exception exists.
+
 Never commit `.env.local`, database passwords, or provider secrets. The Compose defaults are development-only values. Replace `BETTER_AUTH_SECRET` before using a shared development machine.
 
 ## Workspace isolation rule

@@ -8,9 +8,18 @@ export type Database = PostgresJsDatabase<typeof schema>;
 type DatabaseState = { sql: ReturnType<typeof postgres>; db: Database };
 let state: DatabaseState | undefined;
 
+export function getDatabaseClientOptions(env: ReturnType<typeof getEnv> = getEnv()) {
+  return {
+    max: env.DATABASE_POOL_MAX,
+    connect_timeout: env.DATABASE_CONNECT_TIMEOUT_SECONDS,
+    idle_timeout: env.DATABASE_IDLE_TIMEOUT_SECONDS,
+  };
+}
+
 export function getDatabase(): Database {
   if (!state) {
-    const sql = postgres(getEnv().DATABASE_URL, { max: 10 });
+    const env = getEnv();
+    const sql = postgres(env.DATABASE_URL, getDatabaseClientOptions(env));
     state = { sql, db: drizzle(sql, { schema }) };
   }
   return state.db;

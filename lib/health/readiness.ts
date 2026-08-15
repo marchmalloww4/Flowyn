@@ -1,5 +1,5 @@
 import { getSql } from "@/lib/database";
-import { getProductionConfigurationIssues } from "@/lib/env";
+import { getEnv, getRuntimeConfigurationIssues } from "@/lib/env";
 import { checkOllama, checkPostgres, checkRedis, runHealthCheck } from "@/lib/health/checks";
 import { HealthCheckError, type HealthResult } from "@/lib/health/types";
 
@@ -30,7 +30,7 @@ export function checkMigrations(probe: () => Promise<void> = defaultMigrationPro
 }
 
 export async function getReadiness(dependencies: ReadinessDependencies = {}) {
-  const configurationIssues = dependencies.configurationIssues?.() ?? getProductionConfigurationIssues();
+  const configurationIssues = dependencies.configurationIssues?.() ?? getRuntimeConfigurationIssues(getEnv(), "app");
   const [postgres, redis, migrations, ollama] = await Promise.all([
     (dependencies.checkPostgres ?? checkPostgres)(),
     (dependencies.checkRedis ?? checkRedis)(),

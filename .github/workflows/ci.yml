@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: flowyn
+          POSTGRES_PASSWORD: flowyn
+          POSTGRES_DB: flowyn_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U flowyn -d flowyn_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test -- --run
+      - run: npm run build
+      - name: Apply migrations to disposable CI database
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://flowyn:flowyn@localhost:5432/flowyn_ci
+        run: npm run db:migrate
+      - name: Validate development Compose
+        run: docker compose config
+      - name: Validate production Compose interpolation
+        env:
+          NEXT_PUBLIC_APP_URL: https://flowyn.example
+          BETTER_AUTH_TRUSTED_ORIGINS: https://flowyn.example
+          BETTER_AUTH_SECRET: ci-only-production-secret-material
+          DATABASE_URL: postgres://flowyn:password@postgres:5432/flowyn
+          REDIS_URL: redis://redis:6379
+          PRODUCTION_PRIVATE_NETWORK: "true"
+          OLLAMA_BASE_URL: http://ollama:11434
+          OLLAMA_MODEL: llama3.2:3b
+          OLLAMA_EMBEDDING_MODEL: nomic-embed-text
+          WEBHOOK_SECRET_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          WEBHOOK_PUBLIC_BASE_URL: https://flowyn.example
+          AI_IDEMPOTENCY_RESPONSE_KEYRING_JSON: '{"v1":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}'
+          AI_IDEMPOTENCY_RESPONSE_CURRENT_KEY_VERSION: v1
+          INTEGRATION_CREDENTIAL_KEYRING_JSON: '{"v1":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}'
+          INTEGRATION_CREDENTIAL_CURRENT_KEY_VERSION: v1
+          POSTGRES_USER: flowyn
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: flowyn
+        run: docker compose -f docker-compose.production.yml config

@@ -40,11 +40,11 @@ describe("workflow worker", () => {
     const worker = await startWorkflowWorker({ workerId: "worker-a", concurrency: 2 });
     expect(mocks.Worker).toHaveBeenCalledWith("flowyn-workflows", expect.any(Function), expect.objectContaining({ concurrency: 2 }));
     expect(mocks.dispatchPendingWorkflowRuns).toHaveBeenCalled();
-    expect(mocks.workerConnection.set).toHaveBeenCalledWith("flowyn:worker:heartbeat", "worker-a", "EX", expect.any(Number));
+    expect(mocks.workerConnection.set).toHaveBeenCalledWith("flowyn:worker:heartbeat:worker-a", "worker-a", "EX", expect.any(Number));
     await mocks.processor?.({ data: { runId: "run-1" } });
     expect(mocks.executeWorkflowRun).toHaveBeenCalledWith(expect.objectContaining({ runId: "run-1", workerId: "worker-a" }));
     await worker.close();
     expect(mocks.workerClose).toHaveBeenCalled();
-    expect(mocks.workerConnection.del).toHaveBeenCalledWith("flowyn:worker:heartbeat");
+    expect(mocks.workerConnection.del).toHaveBeenCalledWith("flowyn:worker:heartbeat:worker-a");
   });
 });

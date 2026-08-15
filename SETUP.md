@@ -138,6 +138,19 @@ scripts/verify-local.ps1 performs a live finite-vector probe, uses that verified
 
 ## Milestone 12 operations and limits
 
+## Milestone 13 production release posture
+
+Use `docker-compose.production.yml` only with a reviewed external environment file:
+
+```powershell
+docker compose --env-file .env.production -f docker-compose.production.yml config
+docker compose --env-file .env.production -f docker-compose.production.yml build
+docker compose --env-file .env.production -f docker-compose.production.yml up migrator
+docker compose --env-file .env.production -f docker-compose.production.yml up -d app worker scheduler postgres redis ollama
+```
+
+PostgreSQL, Redis, and Ollama have no public host ports in this topology. Do not copy `.env.production` into Git, reset development volumes, or use `db:push`. Read the deployment, migration, and backup/restore runbooks before a release.
+
 Milestone 12 resolves every workspace to the local `SELF_HOSTED` policy. Initial limits are enforced server-side: 30 AI generations per minute and 500 per day; 2 concurrent agents and 120 agent runs per day; 10 concurrent workflows, 60 workflow starts per minute and 1,000 per day; 300 newly accepted webhooks per minute; 50 active schedules; 100 knowledge documents and 10,000,000 knowledge characters; 20 integration credentials; and 2 concurrent integration actions, 30 per minute, and 300 per day.
 
 Daily and durable admissions are authoritative in PostgreSQL. Redis provides only bounded short-window rate limiting and expensive or externally affecting operations fail closed when it is unavailable. The `/api/health` endpoint remains liveness; `/api/health/ready` reports `ready`, `degraded` (Ollama unavailable), or `not_ready` (configuration, PostgreSQL, Redis, or migration unavailable).

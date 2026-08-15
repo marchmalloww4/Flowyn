@@ -42,6 +42,7 @@ export interface PreparedGeneration {
   principal: ExecutionPrincipal;
   inputChars: number;
   usage?: GenerationUsageAdmission;
+  skipUsageAdmission?: boolean;
 }
 
 function resolvePrincipal(input: GenerationRequest): ExecutionPrincipal {
@@ -125,7 +126,7 @@ async function safeRecordGenerationLog(input: Parameters<typeof recordGeneration
 export async function generateText(prepared: PreparedGeneration, db: Database = getDatabase()): Promise<LLMResult> {
   const startedAt = performance.now();
   try {
-    if (prepared.usage) await admitAiGeneration({ workspaceId: prepared.workspaceId, ...prepared.usage, db });
+    if (prepared.usage && !prepared.skipUsageAdmission) await admitAiGeneration({ workspaceId: prepared.workspaceId, ...prepared.usage, db });
     const result = await prepared.provider.generate(prepared.providerInput);
     await safeRecordGenerationLog({ workspaceId: prepared.workspaceId, userId: prepared.userId, provider: prepared.config.provider, model: result.model, status: "SUCCEEDED", durationMs: Math.max(0, Math.round(performance.now() - startedAt)), inputChars: prepared.inputChars, outputChars: result.text.length, correlationId: prepared.usage?.correlationId }, db);
     return result;
@@ -141,7 +142,7 @@ export async function* streamText(prepared: PreparedGeneration, db: Database = g
   let outputChars = 0;
   let model = prepared.config.model;
   try {
-    if (prepared.usage) await admitAiGeneration({ workspaceId: prepared.workspaceId, ...prepared.usage, db });
+    if (prepared.usage && !prepared.skipUsageAdmission) await admitAiGeneration({ workspaceId: prepared.workspaceId, ...prepared.usage, db });
     for await (const chunk of prepared.provider.stream(prepared.providerInput)) {
       model = chunk.model;
       outputChars += chunk.text.length;

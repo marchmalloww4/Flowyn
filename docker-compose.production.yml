@@ -1,0 +1,203 @@
+name: flowyn-production
+
+x-flowyn-environment: &flowyn-environment
+  NODE_ENV: production
+  NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?NEXT_PUBLIC_APP_URL must be set}
+  BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:?BETTER_AUTH_TRUSTED_ORIGINS must be set}
+  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+  REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
+  PRODUCTION_PRIVATE_NETWORK: ${PRODUCTION_PRIVATE_NETWORK:?PRODUCTION_PRIVATE_NETWORK must be set}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:?OLLAMA_BASE_URL must be set}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:?OLLAMA_MODEL must be set}
+  OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:?OLLAMA_EMBEDDING_MODEL must be set}
+  OLLAMA_EMBEDDING_DIMENSION: ${OLLAMA_EMBEDDING_DIMENSION:-768}
+  AI_PROVIDER: ${AI_PROVIDER:-ollama}
+  AI_TEMPERATURE: ${AI_TEMPERATURE:-0.4}
+  AI_MAX_OUTPUT_TOKENS: ${AI_MAX_OUTPUT_TOKENS:-800}
+  AI_REQUEST_TIMEOUT_MS: ${AI_REQUEST_TIMEOUT_MS:-60000}
+  WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?WEBHOOK_SECRET_ENCRYPTION_KEY must be set}
+  WEBHOOK_SECRET_KEY_VERSION: ${WEBHOOK_SECRET_KEY_VERSION:-v1}
+  WEBHOOK_PUBLIC_BASE_URL: ${WEBHOOK_PUBLIC_BASE_URL:?WEBHOOK_PUBLIC_BASE_URL must be set}
+  AI_IDEMPOTENCY_RESPONSE_KEYRING_JSON: ${AI_IDEMPOTENCY_RESPONSE_KEYRING_JSON:?AI_IDEMPOTENCY_RESPONSE_KEYRING_JSON must be set}
+  AI_IDEMPOTENCY_RESPONSE_CURRENT_KEY_VERSION: ${AI_IDEMPOTENCY_RESPONSE_CURRENT_KEY_VERSION:?AI_IDEMPOTENCY_RESPONSE_CURRENT_KEY_VERSION must be set}
+  AI_IDEMPOTENCY_RESPONSE_MAX_CHARS: ${AI_IDEMPOTENCY_RESPONSE_MAX_CHARS:-64000}
+  AI_IDEMPOTENCY_RETENTION_DAYS: ${AI_IDEMPOTENCY_RETENTION_DAYS:-7}
+  INTEGRATION_EGRESS_ENABLED: ${INTEGRATION_EGRESS_ENABLED:-false}
+  INTEGRATION_CREDENTIAL_KEYRING_JSON: ${INTEGRATION_CREDENTIAL_KEYRING_JSON:?INTEGRATION_CREDENTIAL_KEYRING_JSON must be set}
+  INTEGRATION_CREDENTIAL_CURRENT_KEY_VERSION: ${INTEGRATION_CREDENTIAL_CURRENT_KEY_VERSION:?INTEGRATION_CREDENTIAL_CURRENT_KEY_VERSION must be set}
+  DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+  DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+  DATABASE_IDLE_TIMEOUT_SECONDS: ${DATABASE_IDLE_TIMEOUT_SECONDS:-20}
+  REDIS_CONNECT_TIMEOUT_MS: ${REDIS_CONNECT_TIMEOUT_MS:-3000}
+  RUNTIME_SHUTDOWN_TIMEOUT_MS: ${RUNTIME_SHUTDOWN_TIMEOUT_MS:-30000}
+  WEBHOOK_REPLAY_WINDOW_SECONDS: ${WEBHOOK_REPLAY_WINDOW_SECONDS:-300}
+  WEBHOOK_MAX_BODY_BYTES: ${WEBHOOK_MAX_BODY_BYTES:-262144}
+  WEBHOOK_RATE_LIMIT_GLOBAL_PER_MINUTE: ${WEBHOOK_RATE_LIMIT_GLOBAL_PER_MINUTE:-600}
+  WEBHOOK_RATE_LIMIT_TRIGGER_PER_MINUTE: ${WEBHOOK_RATE_LIMIT_TRIGGER_PER_MINUTE:-120}
+  WEBHOOK_EVENT_RETENTION_DAYS: ${WEBHOOK_EVENT_RETENTION_DAYS:-30}
+  WORKFLOW_MAX_STEPS: ${WORKFLOW_MAX_STEPS:-20}
+  WORKFLOW_TOTAL_TIMEOUT_MS: ${WORKFLOW_TOTAL_TIMEOUT_MS:-300000}
+  WORKFLOW_STEP_TIMEOUT_MS: ${WORKFLOW_STEP_TIMEOUT_MS:-60000}
+  WORKFLOW_MAX_RETRIES: ${WORKFLOW_MAX_RETRIES:-2}
+  WORKFLOW_MAX_INPUT_CHARS: ${WORKFLOW_MAX_INPUT_CHARS:-12000}
+  WORKFLOW_MAX_OUTPUT_CHARS: ${WORKFLOW_MAX_OUTPUT_CHARS:-16000}
+  WORKFLOW_MAX_CONTEXT_CHARS: ${WORKFLOW_MAX_CONTEXT_CHARS:-24000}
+  WORKFLOW_DISPATCH_LEASE_MS: ${WORKFLOW_DISPATCH_LEASE_MS:-30000}
+  WORKFLOW_EXECUTION_LEASE_MS: ${WORKFLOW_EXECUTION_LEASE_MS:-90000}
+  WORKFLOW_WORKER_CONCURRENCY: ${WORKFLOW_WORKER_CONCURRENCY:-1}
+  SCHEDULER_POLL_INTERVAL_MS: ${SCHEDULER_POLL_INTERVAL_MS:-5000}
+  SCHEDULER_BATCH_SIZE: ${SCHEDULER_BATCH_SIZE:-25}
+  SCHEDULER_HEARTBEAT_TTL_SECONDS: ${SCHEDULER_HEARTBEAT_TTL_SECONDS:-30}
+  SCHEDULE_MISFIRE_GRACE_SECONDS: ${SCHEDULE_MISFIRE_GRACE_SECONDS:-60}
+  SCHEDULE_MIN_INTERVAL_SECONDS: ${SCHEDULE_MIN_INTERVAL_SECONDS:-60}
+  SCHEDULE_MAX_INTERVAL_SECONDS: ${SCHEDULE_MAX_INTERVAL_SECONDS:-31536000}
+
+services:
+  migrator:
+    build:
+      context: .
+      dockerfile: docker/production.Dockerfile
+    command: ["npm", "run", "db:migrate"]
+    environment: *flowyn-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks: [private]
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/production.Dockerfile
+    environment:
+      <<: *flowyn-environment
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "127.0.0.1:${FLOWYN_APP_PORT:-3000}:3000"
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - private
+      - ingress
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://127.0.0.1:3000/api/health/ready || exit 1"]
+      interval: 10s
+      timeout: 15s
+      retries: 10
+      start_period: 20s
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/production.Dockerfile
+    command: ["npm", "run", "worker"]
+    environment: *flowyn-environment
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks: [private]
+    healthcheck:
+      test: ["CMD-SHELL", "npm run worker:health"]
+      interval: 10s
+      timeout: 15s
+      retries: 10
+      start_period: 20s
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/production.Dockerfile
+    command: ["npm", "run", "scheduler"]
+    environment: *flowyn-environment
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks: [private]
+    healthcheck:
+      test: ["CMD-SHELL", "npm run scheduler:health"]
+      interval: 10s
+      timeout: 15s
+      retries: 10
+      start_period: 20s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+    volumes:
+      - flowyn-production-postgres-data:/var/lib/postgresql/data
+    networks: [private]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - flowyn-production-redis-data:/data
+    networks: [private]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    entrypoint: ["/bin/sh", "/opt/flowyn/entrypoint.sh"]
+    volumes:
+      - flowyn-production-ollama-data:/root/.ollama
+      - ./docker/ollama/entrypoint.sh:/opt/flowyn/entrypoint.sh:ro
+    networks: [private]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+networks:
+  private:
+    internal: true
+  ingress:
+    driver: bridge
+
+volumes:
+  flowyn-production-postgres-data:
+  flowyn-production-redis-data:
+  flowyn-production-ollama-data:

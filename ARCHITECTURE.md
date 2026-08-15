@@ -119,6 +119,8 @@ Webhook tables are workflow_webhook_triggers and workflow_webhook_events. The la
 
 ## Runtime services
 
+Milestone 13 adds `docker/production.Dockerfile` and `docker-compose.production.yml`. The production image runs app, worker, scheduler, and one-shot migrator as separate non-root processes from the same build. The app joins a dedicated ingress network for its loopback/edge binding and the private service network; PostgreSQL, Redis, and Ollama have no host bindings. Production readiness is distinct from liveness, and Ollama failure is degraded only when PostgreSQL, Redis, configuration, and migrations are ready. See `docs/operations/` for deployment, rollback, migration, backup, rotation, incident, and dependency procedures.
+
 Compose starts:
 
 - `app`: Next.js development container.

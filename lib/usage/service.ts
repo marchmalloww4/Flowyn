@@ -4,6 +4,7 @@ import { admitWorkspaceUsage, dayBucketStart, minuteBucketStart } from "@/lib/us
 import { getWorkspaceUsagePolicy } from "@/lib/usage/policy";
 import { consumeWorkspaceRateLimit, type WorkspaceRateLimitRedis } from "@/lib/usage/rate-limit";
 import { getUsageRateLimitRedis } from "@/lib/usage/redis";
+import { metrics } from "@/lib/observability/metrics";
 
 export interface WorkspaceOperationAdmissionInput {
   workspaceId: string;
@@ -27,7 +28,10 @@ async function admitOperation(input: WorkspaceOperationAdmissionInput & {
   const redis = input.redis ?? getUsageRateLimitRedis();
   if (input.rateLimit !== undefined) {
     const rate = await consumeWorkspaceRateLimit(input.workspaceId, input.operationClass, { redis, limit: input.rateLimit, now: now.getTime() });
-    if (!rate.allowed) throw new AppError("WORKSPACE_RATE_LIMIT_EXCEEDED", 429, "Workspace operation rate limit exceeded.");
+    if (!rate.allowed) {
+      metrics.increment("flowyn_admission_decisions_total", { operation: input.operationClass, outcome: "rate_limited" });
+      throw new AppError("WORKSPACE_RATE_LIMIT_EXCEEDED", 429, "Workspace operation rate limit exceeded.");
+    }
   }
 
   const limit = input.dailyLimit ?? input.minuteLimit;
@@ -45,6 +49,7 @@ async function admitOperation(input: WorkspaceOperationAdmissionInput & {
   };
   if (input.db) await admitWorkspaceUsage(admissionInput, input.db);
   else await admitWorkspaceUsage(admissionInput);
+  metrics.increment("flowyn_admission_decisions_total", { operation: input.operationClass, outcome: "admitted" });
 }
 
 export function admitAiGeneration(input: WorkspaceOperationAdmissionInput): Promise<void> {

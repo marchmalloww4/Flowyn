@@ -56,6 +56,10 @@ Structured calls request Ollama JSON, parse the returned text with `JSON.parse`,
 
 `OllamaProvider.stream()` reads Ollama's actual newline-delimited JSON response body incrementally. The generation route forwards chunks as Server-Sent Events and the dashboard appends each received text chunk. The implementation does not fake streaming by splitting a completed response.
 
+## Direct-AI idempotency
+
+When a caller supplies `Idempotency-Key`, the server hashes the key within the workspace and fingerprints the validated request. PostgreSQL creates the idempotency record and durable AI quota admission together before calling `LLMProvider`; duplicates never call the provider or admit quota again. Non-streaming results are bounded and encrypted with the purpose-specific AI response keyring for replay. Streaming results are not replayable: completed duplicates return `AI_STREAM_NOT_REPLAYABLE`, active duplicates return `AI_IDEMPOTENCY_IN_PROGRESS`, and crash windows recover to terminal `UNKNOWN` without an automatic provider retry. A changed request fingerprint returns `AI_IDEMPOTENCY_KEY_REUSED`.
+
 ## Generation logging
 
 `generation_logs` stores workspace/user, provider, model, success/failure status, duration, input/output character counts, safe error code, and creation time. Prompts and responses are not stored by default.

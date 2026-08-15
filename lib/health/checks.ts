@@ -1,6 +1,8 @@
 import Redis from "ioredis";
 import postgres from "postgres";
 import { getEnv } from "@/lib/env";
+import { getDatabaseClientOptions } from "@/lib/database/client";
+import { getRedisConnectionOptions } from "@/lib/queue/connection";
 import { HealthCheckError, type HealthResult } from "@/lib/health/types";
 
 type Probe = () => Promise<void>;
@@ -32,7 +34,8 @@ export function evaluateOllamaModels(models: string[], configuredModel: string):
 }
 
 async function defaultPostgresProbe(): Promise<void> {
-  const sql = postgres(getEnv().DATABASE_URL, { max: 1, connect_timeout: 3 });
+  const env = getEnv();
+  const sql = postgres(env.DATABASE_URL, { ...getDatabaseClientOptions(env), max: 1 });
   try {
     await sql`select 1`;
   } finally {
@@ -41,7 +44,8 @@ async function defaultPostgresProbe(): Promise<void> {
 }
 
 async function defaultRedisProbe(): Promise<void> {
-  const client = new Redis(getEnv().REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1, connectTimeout: 3000 });
+  const env = getEnv();
+  const client = new Redis(env.REDIS_URL, { ...getRedisConnectionOptions(env, "probe"), lazyConnect: true });
   try {
     await client.connect();
     if ((await client.ping()) !== "PONG") throw new HealthCheckError("PING_FAILED", "Redis did not return PONG");

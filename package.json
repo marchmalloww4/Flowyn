@@ -12,6 +12,7 @@
     "test:watch": "vitest --watch",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx lib/database/migrate.ts",
+    "db:preflight": "tsx scripts/db-preflight.ts",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx lib/database/seed.ts",
     "worker": "tsx worker/workflow-worker.ts",
@@ -35,6 +36,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tailwind-merge": "^3.3.0",
+    "tsx": "^4.19.4",
     "zod": "^3.25.67"
   },
   "devDependencies": {
@@ -48,7 +50,6 @@
     "eslint-config-next": "^15.4.7",
     "jsdom": "^26.1.0",
     "tailwindcss": "^4.1.8",
-    "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^3.2.4"

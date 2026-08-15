@@ -259,6 +259,34 @@ export const generationLogs = pgTable("generation_logs", {
   workspaceCreatedIdx: index("generation_logs_workspace_created_idx").on(table.workspaceId, table.createdAt),
 }));
 
+export type AiGenerationIdempotencyMode = "SYNC" | "STREAM";
+export type AiGenerationIdempotencyStatus = "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "UNKNOWN" | "STREAM_COMPLETED";
+
+export const aiGenerationIdempotency = pgTable("ai_generation_idempotency", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  operationKeyHash: text("operation_key_hash").notNull(),
+  requestFingerprint: text("request_fingerprint").notNull(),
+  mode: text("mode").$type<AiGenerationIdempotencyMode>().notNull(),
+  status: text("status").$type<AiGenerationIdempotencyStatus>().notNull().default("IN_PROGRESS"),
+  responseCiphertext: text("response_ciphertext"),
+  responseKeyVersion: text("response_key_version"),
+  errorCode: text("error_code"),
+  correlationId: text("correlation_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+}, (table) => ({
+  workspaceOperationUnique: uniqueIndex("ai_generation_idempotency_workspace_operation_idx").on(table.workspaceId, table.operationKeyHash),
+  workspaceStatusIdx: index("ai_generation_idempotency_workspace_status_idx").on(table.workspaceId, table.status, table.createdAt),
+  expiresIdx: index("ai_generation_idempotency_expires_idx").on(table.expiresAt),
+  modeCheck: check("ai_generation_idempotency_mode_check", sql`${table.mode} in ('SYNC', 'STREAM')`),
+  statusCheck: check("ai_generation_idempotency_status_check", sql`${table.status} in ('IN_PROGRESS', 'SUCCEEDED', 'FAILED', 'UNKNOWN', 'STREAM_COMPLETED')`),
+  responseVersionCheck: check("ai_generation_idempotency_response_version_check", sql`(${table.responseCiphertext} is null and ${table.responseKeyVersion} is null) or (${table.responseCiphertext} is not null and ${table.responseKeyVersion} is not null)`),
+  completionCheck: check("ai_generation_idempotency_completion_check", sql`${table.status} = 'IN_PROGRESS' or ${table.completedAt} is not null`),
+}));
+
 export type AgentRunStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED" | "MAX_STEPS_REACHED";
 export type AgentRunStepType = "MODEL_DECISION" | "TOOL_CALL" | "TOOL_RESULT" | "FINAL_RESPONSE" | "ERROR";
 export type AgentRunStepStatus = "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
@@ -836,6 +864,7 @@ export const schema = {
   workspaceConcurrencyStates,
   workspaceConcurrencyReservations,
   generationLogs,
+  aiGenerationIdempotency,
   agents,
   agentRuns,
   agentRunSteps,

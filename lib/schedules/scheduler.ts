@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
-import Redis from "ioredis";
 import { getEnv } from "@/lib/env";
+import { createSchedulerConnection } from "@/lib/queue/connection";
 import { processDueSchedules, type ScheduleProcessingMetrics } from "@/lib/schedules/processor";
 
-export const SCHEDULER_HEARTBEAT_KEY = "flowyn:scheduler:heartbeat";
+export const SCHEDULER_HEARTBEAT_PREFIX = "flowyn:scheduler:heartbeat:";
+
+export function getSchedulerHeartbeatKey(schedulerId: string): string {
+  return `${SCHEDULER_HEARTBEAT_PREFIX}${schedulerId.replace(/[^A-Za-z0-9._-]/gu, "_").slice(0, 64)}`;
+}
 
 export interface WorkflowSchedulerOptions {
   schedulerId?: string;
@@ -31,7 +35,7 @@ function logMetrics(schedulerId: string, metrics: ScheduleProcessingMetrics, dur
 
 export async function startWorkflowScheduler(options: WorkflowSchedulerOptions = {}): Promise<WorkflowSchedulerRuntime> {
   const env = getEnv();
-  const schedulerId = options.schedulerId ?? "flowyn-scheduler-" + process.pid + "-" + randomUUID().slice(0, 8);
+  const schedulerId = options.schedulerId ?? getEnv().SCHEDULER_INSTANCE_ID ?? "flowyn-scheduler-" + process.pid + "-" + randomUUID().slice(0, 8);
   const pollIntervalMs = options.pollIntervalMs ?? env.SCHEDULER_POLL_INTERVAL_MS;
   const batchSize = options.batchSize ?? env.SCHEDULER_BATCH_SIZE;
   const heartbeatTtlSeconds = options.heartbeatTtlSeconds ?? env.SCHEDULER_HEARTBEAT_TTL_SECONDS;
@@ -39,14 +43,15 @@ export async function startWorkflowScheduler(options: WorkflowSchedulerOptions =
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 100) throw new Error("Scheduler batch size is outside the allowed range.");
   if (!Number.isInteger(heartbeatTtlSeconds) || heartbeatTtlSeconds < 5 || heartbeatTtlSeconds > 3600) throw new Error("Scheduler heartbeat TTL is outside the allowed range.");
 
-  const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 1, enableReadyCheck: true });
+  const redis = createSchedulerConnection();
+  const heartbeatKey = getSchedulerHeartbeatKey(schedulerId);
   const processBatch = options.process ?? ((input) => processDueSchedules(input));
   let polling = false;
   let closing = false;
   let activePoll: Promise<void> | undefined;
 
   const refreshHeartbeat = async () => {
-    await redis.set(SCHEDULER_HEARTBEAT_KEY, schedulerId, "EX", heartbeatTtlSeconds);
+    await redis.set(heartbeatKey, schedulerId, "EX", heartbeatTtlSeconds);
   };
 
   const poll = async () => {
@@ -95,9 +100,15 @@ export async function startWorkflowScheduler(options: WorkflowSchedulerOptions =
     async close() {
       closing = true;
       clearInterval(timer);
-      await activePoll;
-      const current = await redis.get(SCHEDULER_HEARTBEAT_KEY);
-      if (current === schedulerId) await redis.del(SCHEDULER_HEARTBEAT_KEY);
+      let drained = false;
+      try {
+        await Promise.race([activePoll, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Scheduler drain timed out.")), getEnv().RUNTIME_SHUTDOWN_TIMEOUT_MS))]);
+        drained = true;
+      } catch (error) {
+        console.error(JSON.stringify({ event: "workflow_scheduler.drain_failed", schedulerId, error: error instanceof Error ? error.name : "UnknownError" }));
+      }
+      const current = await redis.get(heartbeatKey);
+      if (drained && current === schedulerId) await redis.del(heartbeatKey);
       await redis.quit();
     },
   };

@@ -1,5 +1,5 @@
 import { and, asc, inArray, isNotNull, lt, or } from "drizzle-orm";
-import { getDatabase, type Database, generationLogs, workflowScheduleOccurrences, workspaceConcurrencyReservations, workspaceUsageAdmissions } from "@/lib/database";
+import { getDatabase, type Database, aiGenerationIdempotency, generationLogs, workflowScheduleOccurrences, workspaceConcurrencyReservations, workspaceUsageAdmissions } from "@/lib/database";
 
 export const DEFAULT_OPERATIONAL_RETENTION_DAYS = 30;
 const DEFAULT_CLEANUP_BATCH = 100;
@@ -20,6 +20,7 @@ export interface RetentionCleanupResult {
   scheduleOccurrences: number;
   usageAdmissions: number;
   concurrencyReservations: number;
+  aiIdempotency: number;
   total: number;
 }
 
@@ -61,6 +62,16 @@ async function purgeExpiredReservations(db: Database, cutoff: Date, now: Date, b
   return rows.length;
 }
 
+async function purgeAiIdempotency(db: Database, cutoff: Date, batchSize: number): Promise<number> {
+  const rows = await db.select({ id: aiGenerationIdempotency.id }).from(aiGenerationIdempotency).where(and(
+    lt(aiGenerationIdempotency.createdAt, cutoff),
+    inArray(aiGenerationIdempotency.status, ["SUCCEEDED", "FAILED", "UNKNOWN", "STREAM_COMPLETED"]),
+  )).orderBy(asc(aiGenerationIdempotency.createdAt)).limit(batchSize);
+  if (rows.length === 0) return 0;
+  await db.delete(aiGenerationIdempotency).where(inArray(aiGenerationIdempotency.id, rows.map((row) => row.id)));
+  return rows.length;
+}
+
 export async function cleanupOperationalRetention(options: RetentionCleanupOptions = {}): Promise<RetentionCleanupResult> {
   const db = options.db ?? getDatabase();
   const now = options.now ?? new Date();
@@ -70,11 +81,13 @@ export async function cleanupOperationalRetention(options: RetentionCleanupOptio
   const scheduleOccurrencesCount = await purgeScheduleOccurrences(db, cutoff, batchSize);
   const usageAdmissionsCount = await purgeUsageAdmissions(db, cutoff, batchSize);
   const concurrencyReservationsCount = await purgeExpiredReservations(db, cutoff, now, batchSize);
+  const aiIdempotencyCount = await purgeAiIdempotency(db, getOperationalRetentionCutoff(now, 7), batchSize);
   return {
     generationLogs: generationLogsCount,
     scheduleOccurrences: scheduleOccurrencesCount,
     usageAdmissions: usageAdmissionsCount,
     concurrencyReservations: concurrencyReservationsCount,
-    total: generationLogsCount + scheduleOccurrencesCount + usageAdmissionsCount + concurrencyReservationsCount,
+    aiIdempotency: aiIdempotencyCount,
+    total: generationLogsCount + scheduleOccurrencesCount + usageAdmissionsCount + concurrencyReservationsCount + aiIdempotencyCount,
   };
 }

@@ -1,0 +1,42 @@
+name: Release artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Immutable local artifact tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/production.Dockerfile
+          tags: flowyn:${{ inputs.image_tag }}
+          load: true
+          provenance: true
+          sbom: true
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: flowyn:${{ inputs.image_tag }}
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Record immutable artifact metadata
+        run: |
+          docker image inspect flowyn:${{ inputs.image_tag }} --format '{{json .RepoDigests}}' > image-digest.json
+          printf 'commit=%s\nimage_tag=%s\n' "$GITHUB_SHA" "${{ inputs.image_tag }}" > release-metadata.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flowyn-release-${{ github.sha }}
+          path: |
+            image-digest.json
+            release-metadata.txt
