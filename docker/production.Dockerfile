@@ -1,10 +1,10 @@
-FROM node:20.19.0-alpine AS dependencies
+FROM node:22.23.1-alpine AS dependencies
 
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 
-FROM node:20.19.0-alpine AS builder
+FROM node:22.23.1-alpine AS builder
 
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -19,7 +19,7 @@ COPY db ./db
 COPY instrumentation.ts .
 RUN npm run build
 
-FROM node:20.19.0-alpine AS runner
+FROM node:22.23.1-alpine AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production

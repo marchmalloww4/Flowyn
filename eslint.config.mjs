@@ -1,16 +1,17 @@
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { FlatCompat } from "@eslint/eslintrc";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const compat = new FlatCompat({ baseDirectory: __dirname });
+import { globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTypescript from "eslint-config-next/typescript";
 
 const config = [
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  ...nextVitals,
+  ...nextTypescript,
   {
-    ignores: [".next/**", "node_modules/**", "coverage/**", "db/migrations/**", "next-env.d.ts"],
+    rules: {
+      // Preserve the pre-Next-16 lint policy for existing async loading effects.
+      "react-hooks/set-state-in-effect": "off",
+    },
   },
+  globalIgnores([".next/**", "node_modules/**", "coverage/**", "db/migrations/**", "next-env.d.ts"]),
 ];
 
 export default config;
