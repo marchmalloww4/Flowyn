@@ -7,5 +7,5 @@ test("workspace-scoped surfaces do not render resource data without a selected w
   await expect(page.getByText(/no workspace yet/i)).toBeVisible();
   await expect(page.getByText("M14 isolation sentinel", { exact: true })).toHaveCount(0);
   await page.goto("/dashboard/knowledge");
-  await expect(page.getByText(/create a workspace first/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /create a workspace first/i })).toBeVisible();
 });
