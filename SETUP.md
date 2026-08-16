@@ -31,7 +31,7 @@ Important variables:
 | `OLLAMA_EMBEDDING_DIMENSION` | Verified vector dimension returned by the running model | `768` |
 | `AI_PROVIDER` | Trusted provider selection | `ollama` |
 | `AI_TEMPERATURE` | Default generation temperature | `0.4` |
-| `AI_MAX_OUTPUT_TOKENS` | Default output token limit | `800` |
+| `AI_MAX_OUTPUT_TOKENS` | Default output token limit | `1600` |
 | `AI_REQUEST_TIMEOUT_MS` | Provider request timeout | `60000` |
 | `MAX_GENERATION_PROMPT_CHARS` | Combined prompt character limit | `12000` |
 | `KNOWLEDGE_CHUNK_SIZE` | Deterministic chunk size in characters | `1200` |

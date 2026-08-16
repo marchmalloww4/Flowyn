@@ -2,11 +2,13 @@ export type ClientError = {
   code: string;
   message: string;
   fields: Record<string, string[]>;
+  runId: string | null;
   correlationId: string | null;
   retryable: boolean;
 };
 
 type ErrorBody = {
+  runId?: unknown;
   error?: {
     code?: unknown;
     message?: unknown;
@@ -39,6 +41,7 @@ function messageForCode(code: string, responseMessage: string | null): string {
   if (code.includes("QUOTA") || code.includes("RATE_LIMIT")) return "This workspace has reached an operating limit. Try again later or review Usage and Operations.";
   if (code.includes("CONCURRENCY")) return "This workspace is busy. Try again after an active operation finishes.";
   if (code.includes("AMBIGUOUS")) return "The external action outcome is unknown. Do not retry automatically.";
+  if (code === "AGENT_UNGROUNDED_OUTPUT") return "The agent generated business claims that could not be verified from your saved brand information. Review or add the missing facts and run again.";
   if (code.includes("PROVIDER") || code.includes("OLLAMA") || code.includes("MODEL") || code.includes("EMBEDDING")) return "The AI provider is temporarily unavailable. Try again later.";
   if (code.startsWith("WEBHOOK_")) return "The webhook operation could not be completed.";
   if (code.startsWith("INTEGRATION_")) return "The integration operation could not be completed.";
@@ -58,6 +61,7 @@ export function mapApiError(response: Response, body: unknown): ClientError {
     code,
     message: messageForCode(code, responseMessage),
     fields: readFields(parsed.error?.fields),
+    runId: typeof parsed.runId === "string" ? parsed.runId : null,
     correlationId: response.headers.get("x-flowyn-correlation-id"),
     retryable: false,
   };
@@ -80,6 +84,7 @@ export async function apiRequest<T>(input: RequestInfo | URL, init?: RequestInit
       code: "NETWORK_ERROR",
       message: messageForCode("NETWORK_ERROR", null),
       fields: {},
+      runId: null,
       correlationId: null,
       retryable: false,
     });

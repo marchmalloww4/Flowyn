@@ -37,9 +37,12 @@ export interface AgentRunStepInput {
   completedAt?: Date | null;
 }
 
-function validateConfiguredTools(toolNames: string[]): void {
+function validateConfiguredTools(toolNames: string[], brandId: string | null | undefined): void {
   const registry = createDefaultToolRegistry();
-  for (const name of toolNames) registry.get(name);
+  for (const name of toolNames) {
+    const tool = registry.get(name);
+    if (tool.requiresBrand && !brandId) throw new AppError("AGENT_TOOL_BRAND_REQUIRED", 400, "Select a brand before enabling brand tools.");
+  }
 }
 
 async function validateBrand(userId: string, workspaceId: string, brandId: string | null | undefined, db: Database): Promise<void> {
@@ -65,7 +68,7 @@ export async function createAgent(userId: string, input: AgentCreateInput, db: D
   const parsed = agentCreateSchema.parse(input);
   await requireWorkspaceAction(userId, parsed.workspaceId, "agent.write", db);
   await validateBrand(userId, parsed.workspaceId, parsed.brandId, db);
-  validateConfiguredTools(parsed.allowedTools);
+  validateConfiguredTools(parsed.allowedTools, parsed.brandId);
   getAgentExecutionPolicy(parsed.maxSteps);
   const [agent] = await db.insert(agents).values({
     workspaceId: parsed.workspaceId,
@@ -97,7 +100,9 @@ export async function updateAgent(userId: string, agentId: string, input: AgentP
   const parsed = agentPatchSchema.parse(input);
   await requireWorkspaceAction(userId, existing.workspaceId, "agent.write", db);
   await validateBrand(userId, existing.workspaceId, parsed.brandId, db);
-  if (parsed.allowedTools) validateConfiguredTools(parsed.allowedTools);
+  const nextBrandId = parsed.brandId === undefined ? existing.brandId : parsed.brandId;
+  const nextAllowedTools = parsed.allowedTools ?? existing.allowedTools;
+  validateConfiguredTools(nextAllowedTools, nextBrandId);
   if (parsed.maxSteps !== undefined) getAgentExecutionPolicy(parsed.maxSteps);
   const [agent] = await db.update(agents).set({
     ...(parsed.brandId === undefined ? {} : { brandId: parsed.brandId }),

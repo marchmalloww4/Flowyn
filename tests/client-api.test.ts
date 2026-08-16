@@ -14,9 +14,28 @@ describe("browser API error mapping", () => {
       code: "VALIDATION_ERROR",
       message: "Check the highlighted fields.",
       fields: { email: ["Invalid email"] },
+      runId: null,
       correlationId: null,
       retryable: false,
     });
+  });
+
+  it("preserves a safe agent run linkage when a run fails after creation", () => {
+    const body = { error: { code: "AGENT_TOOL_BRAND_REQUIRED", message: "Select a brand first." }, runId: "run-123" };
+    const error = mapApiError(response(400, body), body);
+
+    expect(error.runId).toBe("run-123");
+    expect(error.message).toBe("Select a brand first.");
+  });
+
+  it("maps ungrounded agent output to a bounded recovery message", () => {
+    const body = { error: { code: "AGENT_UNGROUNDED_OUTPUT", message: "unsafe provider text" }, runId: "run-grounding" };
+    const error = mapApiError(response(422, body), body);
+
+    expect(error.code).toBe("AGENT_UNGROUNDED_OUTPUT");
+    expect(error.runId).toBe("run-grounding");
+    expect(error.message).toContain("could not be verified");
+    expect(error.message).not.toContain("unsafe provider text");
   });
 
   it("maps workflow version conflicts without retrying or discarding edits", () => {

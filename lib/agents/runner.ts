@@ -1,7 +1,9 @@
 import { AIError } from "@/lib/ai/errors";
+import { getAIConfig } from "@/lib/ai/config";
 import { getAIProvider } from "@/lib/ai/service";
 import type { LLMProvider } from "@/lib/ai/types";
 import { agentDecisionSchema, type AgentDecision } from "@/lib/agents/decisions";
+import { AGENT_UNGROUNDED_OUTPUT_MESSAGE, buildGroundingContext, repairGroundedFinalResponse, validateGroundedFinalResponse } from "@/lib/agents/grounding";
 import { buildAgentPrompt } from "@/lib/agents/prompt";
 import { createDefaultToolRegistry, type ToolRegistry } from "@/lib/agents/registry";
 import { completeAgentRun, failAgentRun, recordAgentRunStep, startAgentRun, startAgentRunForPrincipal, type AgentRun, type AgentRunStepInput } from "@/lib/agents/service";
@@ -45,7 +47,7 @@ export class AgentRunError extends AppError {
 }
 
 function buildAgentDecisionJsonSchema(tools: Array<ReturnType<ToolRegistry["get"]>>): Record<string, unknown> {
-  const toolBranches = tools.length > 0 ? tools.map((tool) => ({
+  const toolBranches = tools.map((tool) => ({
     type: "object",
     additionalProperties: false,
     properties: {
@@ -53,14 +55,13 @@ function buildAgentDecisionJsonSchema(tools: Array<ReturnType<ToolRegistry["get"
       arguments: tool.inputJsonSchema ?? { type: "object" },
     },
     required: ["name", "arguments"],
-  })) : [{ type: "object", additionalProperties: false, properties: { name: { type: "string" }, arguments: { type: "object" } }, required: ["name", "arguments"] }];
+  }));
+  const decisionBranches: Record<string, unknown>[] = [{ type: "object", additionalProperties: false, properties: { type: { type: "string", enum: ["final"] }, final: { type: "string", minLength: 1 } }, required: ["type", "final"] }];
+  if (toolBranches.length > 0) decisionBranches.push({ type: "object", additionalProperties: false, properties: { type: { type: "string", enum: ["tool"] }, tool: { oneOf: toolBranches } }, required: ["type", "tool"] });
   return {
     type: "object",
     additionalProperties: false,
-    oneOf: [
-      { type: "object", additionalProperties: false, properties: { type: { type: "string", enum: ["final"] }, final: { type: "string", minLength: 1 } }, required: ["type", "final"] },
-      { type: "object", additionalProperties: false, properties: { type: { type: "string", enum: ["tool"] }, tool: { oneOf: toolBranches } }, required: ["type", "tool"] },
-    ],
+    oneOf: decisionBranches,
   };
 }
 
@@ -128,6 +129,13 @@ function safeErrorCode(error: unknown): string {
   return error instanceof AppError ? error.code : "AGENT_INTERNAL_ERROR";
 }
 
+function safeFailureMetadata(error: unknown, normalized: AppError): Record<string, string | number | boolean | null> {
+  if (error instanceof AIError) {
+    return { errorCode: normalized.code, providerErrorCode: error.code, providerErrorClass: error.constructor.name };
+  }
+  return { errorCode: normalized.code };
+}
+
 function normalizeFailure(error: unknown, operation: OperationKind, totalTimeoutObserved: boolean, abortObserved: boolean): AppError {
   if (error instanceof AppError) return error;
   if (totalTimeoutObserved) {
@@ -137,12 +145,28 @@ function normalizeFailure(error: unknown, operation: OperationKind, totalTimeout
   if (error instanceof AIError && error.code === "REQUEST_TIMEOUT") {
     return agentError("AGENT_TIMEOUT", 504, "The agent execution timed out.");
   }
+  if (error instanceof AIError && error.code === "INVALID_STRUCTURED_OUTPUT") {
+    return agentError("AGENT_INVALID_DECISION", 502, "The agent model returned an invalid decision.");
+  }
   if (operation === "tool") return agentError("AGENT_TOOL_ERROR", 502, "The agent tool failed.");
   return agentError("AGENT_MODEL_ERROR", 502, "The agent model failed.");
 }
 
 function resultFromRun(run: AgentRun | undefined, fallbackRunId: string, status: AgentRunnerResult["status"], stepCount: number, finalResponse: string | null, errorCode: string | null): AgentRunnerResult {
   return { runId: run?.id ?? fallbackRunId, status, stepCount, finalResponse, errorCode };
+}
+
+function validateConfiguredBrandRequirements(registry: ToolRegistry, configuredNames: string[], brandId: string | null | undefined): void {
+  if (brandId) return;
+  for (const name of configuredNames) {
+    try {
+      const tool = registry.get(name);
+      if (tool.requiresBrand) throw agentError("AGENT_TOOL_BRAND_REQUIRED", 400, "This agent has a brand-dependent tool but no brand is selected.");
+    } catch (error) {
+      if (error instanceof AppError && error.code === "AGENT_UNKNOWN_TOOL") continue;
+      throw error;
+    }
+  }
 }
 
 async function recordStep(input: AgentRunStepInput, db: Database): Promise<void> {
@@ -183,16 +207,64 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult>
   else input.abortSignal?.addEventListener("abort", externalAbort, { once: true });
 
   try {
+    validateConfiguredBrandRequirements(registry, started.agent.allowedTools, started.agent.brandId);
     const effectiveTools = registry.getEffectiveTools(started.agent.allowedTools, { brandId: started.agent.brandId ?? undefined });
     const publicTools = registry.getPublicDefinitions(started.agent.allowedTools, { brandId: started.agent.brandId ?? undefined });
     const observations: Array<{ toolName: string; text: string }> = [];
     const admittedDecisionKeys = new Set<string>();
+    const groundingTools = effectiveTools.filter((candidate) => candidate.name === "search_brand_knowledge" || candidate.name === "get_brand_profile");
 
-    for (stepCount = 1; stepCount <= started.policy.maxSteps; stepCount += 1) {
+    for (const tool of groundingTools) {
+      if (stepCount >= started.policy.maxSteps) break;
+      const groundingInput = tool.name === "search_brand_knowledge" ? { query: parsedGoal.goal, topK: 5 } : {};
+      const parsedInput = tool.inputSchema.safeParse(groundingInput);
+      if (!parsedInput.success) throw agentError("AGENT_INVALID_TOOL_INPUT", 400, "The agent grounding tool arguments are invalid.");
+      stepCount += 1;
+      const argumentKeys = Object.keys(groundingInput).sort();
+      await recordStep({
+        workspaceId: started.run.workspaceId,
+        runId: started.run.id,
+        stepNumber: stepCount,
+        type: "TOOL_CALL",
+        toolName: tool.name,
+        status: "SUCCEEDED",
+        safeInputMetadata: { argumentCount: argumentKeys.length, argumentKeys: argumentKeys.join(",") },
+      }, db);
+      operation = "tool";
+      const toolResult = await runWithTimeout(
+        (signal) => tool.execute(parsedInput.data, {
+          workspaceId: started.agent.workspaceId,
+          userId: principal.kind === "user" ? principal.userId : null,
+          principal,
+          agentId: started.agent.id,
+          runId: started.run.id,
+          ...(started.agent.brandId ? { brandId: started.agent.brandId } : {}),
+          abortSignal: signal,
+        }),
+        rootController.signal,
+        started.policy.toolTimeoutMs,
+        () => totalTimeoutObserved,
+      );
+      const serializedObservation = tool.serializeObservation(toolResult.modelObservation);
+      observations.push({ toolName: tool.name, text: serializedObservation });
+      await recordStep({
+        workspaceId: started.run.workspaceId,
+        runId: started.run.id,
+        stepNumber: stepCount,
+        type: "TOOL_RESULT",
+        toolName: tool.name,
+        status: "SUCCEEDED",
+        safeOutputMetadata: { ...toolResult.safeSummary.metadata, durationMs: toolResult.safeSummary.durationMs, characterCount: toolResult.safeSummary.characterCount },
+      }, db);
+    }
+
+    for (stepCount += 1; stepCount <= started.policy.maxSteps; stepCount += 1) {
       let decision: AgentDecision | undefined;
       let selectedTool: ReturnType<ToolRegistry["get"]> | undefined;
       let parsedToolInput: unknown;
       let correctionFeedback: string | undefined;
+      let groundingRepairApplied = false;
+      let providerRepairAttempted = false;
       for (let attempt = 0; attempt < 3 && !decision; attempt += 1) {
         const built = buildAgentPrompt({
           agent: started.agent,
@@ -209,12 +281,22 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult>
             admittedDecisionKeys.add(operationKey);
           }
         }
-        const modelResult = await runWithTimeout(
-          (signal) => provider.generateStructured({ prompt: built.prompt, system: correctionFeedback ? `${built.system}\nServer validation feedback: ${correctionFeedback}` : built.system, schema: agentDecisionSchema, format: buildAgentDecisionJsonSchema(effectiveTools), temperature: 0, maxTokens: 400, signal }),
-          rootController.signal,
-          started.policy.modelTimeoutMs,
-          () => totalTimeoutObserved,
-        );
+        let modelResult: Awaited<ReturnType<LLMProvider["generateStructured"]>>;
+        try {
+          modelResult = await runWithTimeout(
+            (signal) => provider.generateStructured({ prompt: built.prompt, system: correctionFeedback ? `${built.system}\nServer validation feedback: ${correctionFeedback}` : built.system, schema: agentDecisionSchema, format: buildAgentDecisionJsonSchema(effectiveTools), temperature: 0, maxTokens: getAIConfig().maxOutputTokens, signal }),
+            rootController.signal,
+            started.policy.modelTimeoutMs,
+            () => totalTimeoutObserved,
+          );
+        } catch (error) {
+          if (error instanceof AIError && error.code === "INVALID_STRUCTURED_OUTPUT" && !providerRepairAttempted) {
+            providerRepairAttempted = true;
+            correctionFeedback = "The previous response was not complete valid JSON or did not match the server decision schema. Return exactly one concise JSON object, without markdown fences, HTML, or explanation outside the object.";
+            continue;
+          }
+          throw error;
+        }
         const decisionResult = agentDecisionSchema.safeParse(modelResult.value);
         if (!decisionResult.success) {
           if (attempt < 2) {
@@ -225,6 +307,22 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult>
         }
         const candidate = decisionResult.data;
         if (candidate.type === "final") {
+          if (groundingTools.length > 0 && observations.length === 0) {
+            if (attempt < 2) {
+              correctionFeedback = "Before returning a final response, use at least one authorized tool to retrieve the saved facts for this goal.";
+              continue;
+            }
+            throw agentError("AGENT_INVALID_DECISION", 502, "The agent must retrieve authorized facts before returning a final response.");
+          }
+          const groundingCheck = validateGroundedFinalResponse(candidate.final, buildGroundingContext({ goal: parsedGoal.goal, observations }));
+          if (!groundingCheck.ok) {
+            const repaired = repairGroundedFinalResponse(candidate.final, buildGroundingContext({ goal: parsedGoal.goal, observations }));
+            const repairedCheck = validateGroundedFinalResponse(repaired, buildGroundingContext({ goal: parsedGoal.goal, observations }));
+            if (!repairedCheck.ok) throw agentError("AGENT_UNGROUNDED_OUTPUT", 422, AGENT_UNGROUNDED_OUTPUT_MESSAGE);
+            groundingRepairApplied = true;
+            decision = { type: "final", final: repaired };
+            break;
+          }
           decision = candidate;
           break;
         }
@@ -252,7 +350,7 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult>
         type: "MODEL_DECISION",
         status: "SUCCEEDED",
         safeOutputMetadata: decision.type === "final"
-          ? { decisionType: "final", finalResponseChars: Math.min(decision.final.length, started.policy.maxFinalResponseChars) }
+          ? { decisionType: "final", finalResponseChars: Math.min(decision.final.length, started.policy.maxFinalResponseChars), ...(groundingRepairApplied ? { groundingRepairApplied: true } : {}) }
           : { decisionType: "tool", toolName: decision.tool.name },
       }, db);
 
@@ -324,7 +422,7 @@ export async function runAgent(input: RunAgentInput): Promise<AgentRunnerResult>
         type: "ERROR",
         status: status === "CANCELLED" ? "CANCELLED" : "FAILED",
         errorCode: normalized.code,
-        safeOutputMetadata: { errorCode: normalized.code },
+        safeOutputMetadata: safeFailureMetadata(error, normalized),
       }, db);
       await failAgentRun(started.run.id, { status, stepCount: Math.min(stepCount, started.policy.maxSteps), errorCode: normalized.code }, db);
     } catch (persistenceError) {

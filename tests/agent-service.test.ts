@@ -79,6 +79,20 @@ describe("agent definition service", () => {
     expect(db.insert).not.toHaveBeenCalled();
   });
 
+  it.each(["get_brand_profile", "search_brand_knowledge"])("rejects %s without a brand before writing", async (toolName) => {
+    const db = database();
+
+    await expect(createAgent("user-a", { workspaceId, name: "Unscoped agent", description: "", systemInstructions: "", allowedTools: [toolName], enabled: true, maxSteps: 5 }, db as never)).rejects.toMatchObject({ code: "AGENT_TOOL_BRAND_REQUIRED", status: 400 });
+    expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it("rejects removing the brand while retaining brand-required tools", async () => {
+    const db = database();
+
+    await expect(updateAgent("user-a", agentId, { brandId: null }, db as never)).rejects.toMatchObject({ code: "AGENT_TOOL_BRAND_REQUIRED", status: 400 });
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
   it("updates an agent through the workspace write action", async () => {
     const db = database();
     await expect(updateAgent("user-a", agentId, { name: "Updated agent", enabled: false }, db as never)).resolves.toMatchObject({ id: agentId });

@@ -47,7 +47,7 @@ describe("agent routes", () => {
     mocks.getAgent.mockResolvedValue({ id: agentId, workspaceId, name: "Research", enabled: true, deletedAt: null });
     mocks.updateAgent.mockResolvedValue({ id: agentId, workspaceId, name: "Updated", enabled: true, deletedAt: null });
     mocks.deleteAgent.mockResolvedValue(undefined);
-    mocks.runAgent.mockResolvedValue({ status: "COMPLETED", stepCount: 1, finalResponse: "Done.", errorCode: undefined });
+    mocks.runAgent.mockResolvedValue({ runId, status: "COMPLETED", stepCount: 1, finalResponse: "Done.", errorCode: null });
     mocks.getAgentRun.mockResolvedValue({
       run: { id: runId, workspaceId, status: "COMPLETED", stepCount: 1, finalResponse: "Done.", errorCode: null },
       steps: [{ id: "step-1", stepNumber: 1, type: "FINAL_RESPONSE", status: "SUCCEEDED", safeInputMetadata: {}, safeOutputMetadata: { finalResponseChars: 5 }, errorCode: null }],
@@ -93,13 +93,27 @@ describe("agent routes", () => {
 
   it("runs synchronously and derives all runtime identity from the route and session", async () => {
     const response = await runAgentPost(jsonRequest(`http://localhost/api/agents/${agentId}/runs`, "POST", { goal: "Find violet" }), routeContext);
-    const body = await response.json() as { run: { status: string; finalResponse: string } };
+    const body = await response.json() as { run: { runId: string; status: string; finalResponse: string } };
 
     expect(response.status).toBe(200);
+    expect(body.run.runId).toBe(runId);
     expect(body.run.status).toBe("COMPLETED");
     expect(mocks.runAgent).toHaveBeenCalledWith(expect.objectContaining({ userId: "user-1", agentId, goal: "Find violet", abortSignal: expect.any(AbortSignal) }));
     expect(mocks.runAgent.mock.calls[0]?.[0]).not.toHaveProperty("workspaceId");
     expect(mocks.runAgent.mock.calls[0]?.[0]).not.toHaveProperty("brandId");
+  });
+
+  it("returns the durable run UUID on a safe failure response", async () => {
+    const failure = new AppError("AGENT_TIMEOUT", 504, "The agent execution timed out.") as AppError & { runId: string };
+    failure.runId = runId;
+    mocks.runAgent.mockRejectedValueOnce(failure);
+
+    const response = await runAgentPost(jsonRequest(`http://localhost/api/agents/${agentId}/runs`, "POST", { goal: "Wait" }), routeContext);
+    const body = await response.json() as { error: { code: string; message: string }; runId: string };
+
+    expect(response.status).toBe(504);
+    expect(body.error).toEqual({ code: "AGENT_TIMEOUT", message: "The agent execution timed out." });
+    expect(body.runId).toBe(runId);
   });
 
   it("rejects client-supplied runtime identity and policy fields", async () => {

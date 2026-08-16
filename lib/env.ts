@@ -26,7 +26,7 @@ const envSchema = z.object({
   OLLAMA_EMBEDDING_DIMENSION: z.coerce.number().int().positive().max(4096).default(768),
   AI_PROVIDER: z.enum(["ollama"]).default("ollama"),
   AI_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.4),
-  AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().max(4000).default(800),
+  AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().max(4000).default(1600),
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().max(300000).default(60000),
   MAX_GENERATION_PROMPT_CHARS: z.coerce.number().int().positive().max(100000).default(12000),
   KNOWLEDGE_CHUNK_SIZE: z.coerce.number().int().positive().max(10000).default(1200),

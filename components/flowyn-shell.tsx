@@ -174,24 +174,27 @@ export function FlowynShell({ children, userEmail }: { children: React.ReactNode
       ) : null}
 
       <main className="lg:pl-64" id="main-content" tabIndex={-1}>
-        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-10">{children}</div>
-      </main>
-
-      <div className="fixed bottom-4 right-4 z-30">
-        <Button aria-expanded={accountOpen} aria-haspopup="menu" aria-label="Open account menu" onClick={() => setAccountOpen((open) => !open)} size="sm" variant="outline">
-          <span className="max-w-36 truncate">{userEmail ?? "Account"}</span>
-        </Button>
-        {accountOpen ? (
-          <div aria-label="Account menu" className="absolute bottom-12 right-0 w-64 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-800 dark:bg-slate-950" role="menu">
-            <p className="truncate px-3 py-2 text-xs text-slate-500">{userEmail ?? "Local user"}</p>
-            <Button className="w-full justify-start" onClick={handleSignOut} role="menuitem" variant="ghost">
-              <LogOut aria-hidden className="h-4 w-4" />
-              Sign out
-            </Button>
-            {signOutError ? <p aria-live="polite" className="px-3 pt-2 text-xs text-red-600">{signOutError}</p> : null}
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-10">
+          <div className="mb-6 flex justify-end">
+            <div className="relative max-w-full">
+              <Button aria-expanded={accountOpen} aria-haspopup="menu" aria-label="Open account menu" onClick={() => setAccountOpen((open) => !open)} size="sm" variant="outline">
+                <span className="max-w-[min(18rem,calc(100vw-6rem))] truncate">{userEmail ?? "Account"}</span>
+              </Button>
+              {accountOpen ? (
+                <div aria-label="Account menu" className="absolute right-0 top-12 z-30 w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-800 dark:bg-slate-950" role="menu">
+                  <p className="break-words px-3 py-2 text-xs text-slate-500">{userEmail ?? "Local user"}</p>
+                  <Button className="w-full justify-start" onClick={handleSignOut} role="menuitem" variant="ghost">
+                    <LogOut aria-hidden className="h-4 w-4" />
+                    Sign out
+                  </Button>
+                  {signOutError ? <p aria-live="polite" className="px-3 pt-2 text-xs text-red-600">{signOutError}</p> : null}
+                </div>
+              ) : null}
+            </div>
           </div>
-        ) : null}
-      </div>
+          {children}
+        </div>
+      </main>
     </div>
   );
 }

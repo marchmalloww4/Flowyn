@@ -2,9 +2,9 @@
 
 Flowyn is a local-first, agentic business automation platform. It is designed to become a visual system where triggers, brand knowledge, AI agents, tools, decisions, approvals, and actions work together.
 
-This repository contains the completed **Milestones 1 through 15**. M15 is the
-final project milestone and is a release-candidate and beta-validation milestone;
-it does not add a new product capability.
+This repository contains the completed **Milestones 1 through 14** plus the
+final Milestone 15 release-candidate and beta-validation work. M15 is the final
+project milestone and does not add a new product capability.
 
 - Next.js App Router with strict TypeScript.
 - Tailwind CSS v4 and shadcn/ui-compatible primitives.

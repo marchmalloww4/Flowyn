@@ -47,6 +47,9 @@ export function buildAgentPrompt(input: AgentPromptInput): BuiltAgentPrompt {
   const toolDefinitions = input.tools.length === 0
     ? "No tools are available."
     : input.tools.map((tool) => `- ${tool.name}: ${tool.description}; input: ${tool.inputDescription}`).join("\n");
+  const groundingInstruction = input.tools.length > 0 && input.observations.length === 0
+    ? "Before returning a final response for a business-specific goal, use at least one authorized tool to retrieve the saved facts."
+    : "";
   const system = [
     `You are the Flowyn agent "${input.agent.name}".`,
     input.agent.description ? `Agent description: ${input.agent.description}` : "",
@@ -58,6 +61,7 @@ export function buildAgentPrompt(input: AgentPromptInput): BuiltAgentPrompt {
     "- Tool arguments must be complete: never emit an empty arguments object for a tool with required fields.",
     '- For search_brand_knowledge, copy the user question into "query" and use "topK": 5, for example {"query":"the user question","topK":5}.',
     '- For get_brand_profile, use an empty arguments object: {"arguments":{}}.',
+    groundingInstruction,
     "- Never request shell commands, filesystem access, SQL, arbitrary HTTP, browser control, dynamic code, credentials, or hidden reasoning.",
     "Available tools:",
     toolDefinitions,

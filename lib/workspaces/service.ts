@@ -5,10 +5,7 @@ import { requireWorkspaceAction, requireWorkspaceRole } from "@/lib/authz/author
 import { recordAuditEvent } from "@/lib/audit/service";
 import { AppError } from "@/lib/security/errors";
 import { type WorkspaceInput, type WorkspacePatch } from "@/lib/workspaces/validation";
-
-function slugForName(name: string): string {
-  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
-}
+import { slugSuggestion } from "@/lib/workspaces/slug";
 
 export const requireWorkspaceMember = requireAuthorizedWorkspaceMember;
 
@@ -17,7 +14,7 @@ export async function listWorkspaces(userId: string, db: Database = getDatabase(
 }
 
 export async function createWorkspace(userId: string, input: WorkspaceInput, db: Database = getDatabase()) {
-  const slug = input.slug || slugForName(input.name);
+  const slug = input.slug || slugSuggestion(input.name);
   return db.transaction(async (tx) => {
     const [workspace] = await tx.insert(workspaces).values({ name: input.name, slug, createdBy: userId }).returning();
     if (!workspace) throw new AppError("WORKSPACE_CREATE_FAILED", 500, "Workspace could not be created.");

@@ -29,7 +29,7 @@ describe("AI configuration", () => {
       provider: "ollama",
       model: "llama3.2:3b",
       temperature: 0.4,
-      maxOutputTokens: 800,
+      maxOutputTokens: 1600,
       timeoutMs: 60000,
       maxPromptChars: 12000,
     });
