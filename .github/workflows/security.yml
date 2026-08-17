@@ -39,7 +39,7 @@ jobs:
           file: docker/production.Dockerfile
           tags: flowyn:m13-security-scan
           load: true
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: flowyn:m13-security-scan
           severity: CRITICAL,HIGH
